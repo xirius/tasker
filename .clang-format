@@ -1,0 +1,128 @@
+---
+Language: Cpp
+Standard: Cpp11
+
+AccessModifierOffset: -2
+AlignAfterOpenBracket: AlwaysBreak
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: false
+AlignEscapedNewlines: Left
+AlignOperands: false
+AlignTrailingComments: true
+#AllowAllArgumentsOnNextLine: true                  # DOESN'T WORK (YET?)
+#AllowAllConstructorInitializersOnNextLine: true    # DOESN'T WORK (YET?)
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackParameters: false
+AllowShortBlocksOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+#AllowShortIfStatementsOnASingleLine: Never         # DOESN'T WORK (YET?)
+#AllowShortLambdasOnASingleLine: All                # DOESN'T WORK (YET?)
+AllowShortLoopsOnASingleLine: true
+AlwaysBreakAfterReturnType: None
+AlwaysBreakBeforeMultilineStrings: true
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: true
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  #AfterCaseLabel: false                            # DOESN'T WORK (YET?)
+  AfterClass: true
+  AfterControlStatement: false
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterObjCDeclaration: false
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: false
+  BeforeCatch: true
+  BeforeElse: true
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: false
+
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakInheritanceList: BeforeColon
+BreakStringLiterals: true
+#-------------------------------------------------------------------------------------------------------------------------------------------
+ColumnLimit: 140
+CommentPragmas:  '^ IWYU pragma:'
+CompactNamespaces: false
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+Cpp11BracedListStyle: true
+DerivePointerAlignment: false
+DisableFormat: false
+FixNamespaceComments: true
+
+ForEachMacros:
+  - foreach
+  - Q_FOREACH
+  - BOOST_FOREACH
+
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:           '^["].*["]'
+    Priority:        1
+  - Regex:           '^<(demo|core|my_lib_1|my_lib_2|my_lib_etc)/'
+    Priority:        2
+  - Regex:           '^<(nonstd|third_party_1|third_party_2|third_party_etc)/'
+    Priority:        3
+  - Regex:           '^<.*'
+    Priority:        4
+#    SortPriority:    0
+IncludeIsMainRegex: '(Test)?$'
+
+IndentCaseLabels: false
+IndentPPDirectives: None
+IndentWidth: 4
+IndentWrappedFunctionNames: true
+JavaScriptQuotes: Leave
+JavaScriptWrapImports: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MacroBlockBegin: ''
+MacroBlockEnd:   ''
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: Inner
+
+#PenaltyBreakAssignment:
+#PenaltyBreakBeforeFirstCallParameter:
+#PenaltyBreakComment:
+#PenaltyBreakFirstLessLess:
+#PenaltyBreakString:
+#PenaltyBreakTemplateDeclaration:
+#PenaltyExcessCharacter:
+#PenaltyReturnTypeOnItsOwnLine:
+
+PointerAlignment: Left
+ReflowComments: true
+SortIncludes: true
+SortUsingDeclarations: true
+SpaceAfterCStyleCast: false
+#SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: false
+SpaceBeforeInheritanceColon: false
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+#SpaceInEmptyBlock: false
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 1
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+#A vector of macros that should be interpreted as complete statements.
+#StatementMacros:
+TabWidth: 4
+# A vector of macros that should be interpreted as type declarations instead of as function calls.
+#TypenameMacros: ['STACK_OF', 'LIST']
+UseTab: Never
+...
