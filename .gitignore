@@ -31,10 +31,10 @@
 *.out
 *.app
 
-# JetBrains CLion
+# JetBrains
 .idea/
 
 # CMake files and builds
 build/
-cmake-build-debug/
-cmake-build-release/
+*build-debug/
+*build-release/
