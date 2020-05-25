@@ -2,7 +2,7 @@
 
 #include <tasker/CancellationToken.h>
 
-using namespace core::concurrent;
+using namespace tasker;
 
 TEST_CASE("Equality operator should return false for two distinct tokens", "[token]")
 {
