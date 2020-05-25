@@ -5,7 +5,6 @@ if(BUILD_EXAMPLES)
 
     foreach(child ${children})
         if(IS_DIRECTORY "${CURRENT_DIR}/${child}" AND EXISTS "${CURRENT_DIR}/${child}/CMakeLists.txt")
-            message("${child}")
             add_subdirectory("${child}")
         endif()
     endforeach()

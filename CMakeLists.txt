@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(Tasker VERSION 1.0 DESCRIPTION "Tasker C++" LANGUAGES CXX)
+project(Vanilo VERSION 1.0 DESCRIPTION "Vanilo Tasker C++" LANGUAGES CXX)
 
 if(${CMAKE_VERSION} VERSION_LESS 3.12)
     cmake_policy(VERSION ${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION})
@@ -29,5 +29,5 @@ include(Environment)
 
 # Add modules
 add_subdirectory(extern)
-add_subdirectory(tasker)
+add_subdirectory(vanilo)
 add_subdirectory(examples)

@@ -1,2 +1,2 @@
-# tasker
-A modern and simple C++14 Task Runner
+# Vanilo Tasker
+A modern and simple C++14 Task Runner. Exploring some ideas ...

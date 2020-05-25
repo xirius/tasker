@@ -1,6 +1,6 @@
 #include "catch2/catch.hpp"
 
-#include <tasker/CancellationToken.h>
+#include <vanilo/tasker/CancellationToken.h>
 
 using namespace tasker;
 
