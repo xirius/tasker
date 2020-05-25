@@ -58,6 +58,7 @@ target_include_directories(${TARGET_NAME}
 
 target_sources(${TARGET_NAME} PRIVATE ${SOURCES})
 
+# Build Unit Tests
 if(BUILD_UNIT_TESTS)
     set(TARGET_UT_NAME "${TARGET_NAME}.tests")
 

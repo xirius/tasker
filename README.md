@@ -1,2 +1,2 @@
-# taskr
-A modern C++14 Task Runner
+# tasker
+A modern and simple C++14 Task Runner
