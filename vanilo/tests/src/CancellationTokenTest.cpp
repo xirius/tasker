@@ -1,6 +1,6 @@
-#include "catch2/catch.hpp"
-
 #include <vanilo/tasker/CancellationToken.h>
+
+#include <catch2/catch.hpp>
 
 using namespace tasker;
 
@@ -30,7 +30,7 @@ SCENARIO("Token state must change with cancellation", "[token]")
     {
         CancellationToken token2 = token1;
 
-        WHEN("No cancellation have been performed")
+        WHEN("No cancellation has been performed")
         {
             THEN("isCanceled should return false")
             {
@@ -39,7 +39,7 @@ SCENARIO("Token state must change with cancellation", "[token]")
             }
         }
 
-        WHEN("Token was canceled")
+        WHEN("Token is canceled")
         {
             token2.cancel();
 
