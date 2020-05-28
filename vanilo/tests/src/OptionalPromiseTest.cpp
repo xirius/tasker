@@ -24,7 +24,7 @@ SCENARIO("Promise must change its state when future is taken", "[promise]")
 
             THEN("The state is valid")
             {
-                REQUIRE_FALSE(!promise.isValid());
+                REQUIRE(promise.isValid());
             }
         }
     }
