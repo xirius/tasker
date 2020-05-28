@@ -2,7 +2,7 @@
 
 #include <catch2/catch.hpp>
 
-using namespace tasker;
+using namespace vanilo::tasker;
 
 TEST_CASE("Equality operator should return false for two distinct tokens", "[token]")
 {
