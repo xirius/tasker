@@ -12,10 +12,13 @@ add_library("${TARGET_NAME}::${TARGET_NAME}" ALIAS "${TARGET_NAME}")
 
 # Export header
 include("GenerateExportHeader")
-generate_export_header("${TARGET_NAME}")
-string(TOLOWER ${TARGET_NAME} TARGET_EXPORT_HEADER)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_EXPORT_HEADER}_export.h" DESTINATION "include")
 string(TOUPPER "${TARGET_NAME}_STATIC_DEFINE" TARGET_EXPORT_DEFINE)
+string(TOLOWER "_${TARGET_NAME}_export.h" TARGET_EXPORT_FILE)
+
+generate_export_header("${TARGET_NAME}"
+    EXPORT_MACRO_NAME "${TARGET_EXPORT_DEFINE}"
+    EXPORT_FILE_NAME "${TARGET_EXPORT_FILE}")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_EXPORT_FILE}" DESTINATION "include")
 
 # Folder structure
 set(PUBLIC_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
