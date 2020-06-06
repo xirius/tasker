@@ -1,5 +1,6 @@
 # Tasker library
 set(TARGET_NAME "Vanilo")
+set(TARGET_ALIAS "${TARGET_NAME}::${TARGET_NAME}")
 
 # Use POSIX threads
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -8,7 +9,7 @@ find_package(Threads REQUIRED)
 
 # Defining library
 add_library("${TARGET_NAME}" "")
-add_library("${TARGET_NAME}::${TARGET_NAME}" ALIAS "${TARGET_NAME}")
+add_library("${TARGET_ALIAS}" ALIAS "${TARGET_NAME}")
 
 # Export header
 include("GenerateExportHeader")
@@ -63,6 +64,7 @@ target_include_directories(${TARGET_NAME}
     PRIVATE $<BUILD_INTERFACE:${SOURCE_DIR}>)
 
 target_sources(${TARGET_NAME} PRIVATE ${SOURCES})
+target_link_libraries("${TARGET_NAME}" PUBLIC Threads::Threads)
 
 # Build Unit Tests
 if(BUILD_UNIT_TESTS)
@@ -80,12 +82,10 @@ if(BUILD_UNIT_TESTS)
 
     # Create unit test executable
     add_executable(${TARGET_UT_NAME} ${UT_SOURCES} ${SOURCES})
+    target_link_libraries(${TARGET_UT_NAME} PRIVATE ${TARGET_ALIAS})
 
     # Set common compile options
     target_compile_options(${TARGET_UT_NAME} PRIVATE -Werror)
-
-    # Retrieve the module's included directories
-    get_target_property(INCLUDE_DIRS ${TARGET_NAME} INCLUDE_DIRECTORIES)
 
     # Set include directories of private and public headers
     target_include_directories(${TARGET_UT_NAME} PRIVATE ${INCLUDE_DIRS})
