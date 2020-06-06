@@ -1,23 +1,26 @@
 ---
 Language: Cpp
-Standard: Cpp11
+Standard: Latest
 
 AccessModifierOffset: -2
 AlignAfterOpenBracket: AlwaysBreak
 AlignConsecutiveAssignments: true
+#AlignConsecutiveBitFields: true                    # DOESN'T WORK (YET?)
 AlignConsecutiveDeclarations: false
+AlignConsecutiveMacros: true
 AlignEscapedNewlines: Left
 AlignOperands: false
 AlignTrailingComments: true
-#AllowAllArgumentsOnNextLine: true                  # DOESN'T WORK (YET?)
-#AllowAllConstructorInitializersOnNextLine: true    # DOESN'T WORK (YET?)
+AllowAllArgumentsOnNextLine: true
+AllowAllConstructorInitializersOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: true
 BinPackParameters: false
-AllowShortBlocksOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
 AllowShortCaseLabelsOnASingleLine: false
+#AllowShortEnumsOnASingleLine: false                # DOESN'T WORK (YET?)
 AllowShortFunctionsOnASingleLine: None
-#AllowShortIfStatementsOnASingleLine: Never         # DOESN'T WORK (YET?)
-#AllowShortLambdasOnASingleLine: All                # DOESN'T WORK (YET?)
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: All
 AllowShortLoopsOnASingleLine: true
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: true
@@ -26,9 +29,9 @@ BinPackArguments: true
 
 BreakBeforeBraces: Custom
 BraceWrapping:
-  #AfterCaseLabel: false                            # DOESN'T WORK (YET?)
+  AfterCaseLabel: false
   AfterClass: true
-  AfterControlStatement: false
+  AfterControlStatement: MultiLine
   AfterEnum: true
   AfterFunction: true
   AfterNamespace: false
@@ -38,6 +41,8 @@ BraceWrapping:
   AfterExternBlock: false
   BeforeCatch: true
   BeforeElse: true
+  #BeforeLambdaBody: false                        # DOESN'T WORK (YET?)
+  #BeforeWhile: true                              # DOESN'T WORK (YET?)
   IndentBraces: false
   SplitEmptyFunction: true
   SplitEmptyRecord: true
@@ -56,6 +61,7 @@ ConstructorInitializerAllOnOneLineOrOnePerLine: false
 ConstructorInitializerIndentWidth: 4
 ContinuationIndentWidth: 4
 Cpp11BracedListStyle: true
+DeriveLineEnding: true
 DerivePointerAlignment: false
 DisableFormat: false
 FixNamespaceComments: true
@@ -78,7 +84,9 @@ IncludeCategories:
 #    SortPriority:    0
 IncludeIsMainRegex: '(Test)?$'
 
-IndentCaseLabels: false
+IndentCaseBlocks: false
+IndentCaseLabels: true
+#IndentExternBlock: Indent            # DOESN'T WORK (YET?)
 IndentPPDirectives: None
 IndentWidth: 4
 IndentWrappedFunctionNames: true
@@ -88,7 +96,7 @@ KeepEmptyLinesAtTheStartOfBlocks: false
 MacroBlockBegin: ''
 MacroBlockEnd:   ''
 MaxEmptyLinesToKeep: 1
-NamespaceIndentation: Inner
+NamespaceIndentation: All
 
 #PenaltyBreakAssignment:
 #PenaltyBreakBeforeFirstCallParameter:
@@ -104,7 +112,7 @@ ReflowComments: true
 SortIncludes: true
 SortUsingDeclarations: true
 SpaceAfterCStyleCast: false
-#SpaceAfterLogicalNot: false
+SpaceAfterLogicalNot: false
 SpaceAfterTemplateKeyword: true
 SpaceBeforeAssignmentOperators: true
 SpaceBeforeCpp11BracedList: false
@@ -112,7 +120,7 @@ SpaceBeforeCtorInitializerColon: false
 SpaceBeforeInheritanceColon: false
 SpaceBeforeParens: ControlStatements
 SpaceBeforeRangeBasedForLoopColon: true
-#SpaceInEmptyBlock: false
+SpaceInEmptyBlock: false
 SpaceInEmptyParentheses: false
 SpacesBeforeTrailingComments: 1
 SpacesInAngles: false
