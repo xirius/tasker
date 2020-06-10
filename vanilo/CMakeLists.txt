@@ -64,7 +64,7 @@ target_include_directories(${TARGET_NAME}
     PRIVATE $<BUILD_INTERFACE:${SOURCE_DIR}>)
 
 target_sources(${TARGET_NAME} PRIVATE ${SOURCES})
-target_link_libraries("${TARGET_NAME}" PUBLIC Threads::Threads)
+target_link_libraries("${TARGET_NAME}" PUBLIC Threads::Threads -latomic)
 
 # Build Unit Tests
 if(BUILD_UNIT_TESTS)
