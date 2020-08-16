@@ -9,8 +9,7 @@
 #include <iostream>
 #include <type_traits>
 
-namespace vanilo {
-namespace core {
+namespace vanilo::core {
 
     /**
      * @return The size of the static array.
@@ -50,7 +49,7 @@ namespace core {
         void operator()(const char* format, const Args&... args) noexcept
         {
             char buffer[BUFFER_SIZE];
-            auto count = snprintf(buffer, countOf(buffer), u8"%s(%d): ", _filename, _line);
+            auto count = snprintf(buffer, countOf(buffer), "%s(%d): ", _filename, _line);
 
             ASSERT(count >= 0 && count < static_cast<int>(countOf(buffer)));
 
@@ -72,7 +71,7 @@ namespace core {
 
         static int append(char* buffer, const int count, const char* format) noexcept
         {
-            return snprintf(buffer + count, BUFFER_SIZE - count, u8"%s", format);
+            return snprintf(buffer + count, BUFFER_SIZE - count, "%s", format);
         }
 
         const char* _filename;
@@ -81,7 +80,6 @@ namespace core {
 
 #endif
 
-} // namespace core
-} // namespace vanilo
+} // namespace vanilo::core
 
 #endif // INC_A276C213E55E4D9A9BDCED4035E01132
