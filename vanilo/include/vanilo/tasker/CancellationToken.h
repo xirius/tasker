@@ -3,8 +3,7 @@
 #include <atomic>
 #include <memory>
 
-namespace vanilo {
-namespace tasker {
+namespace vanilo::tasker {
 
     /**
      *
@@ -18,7 +17,7 @@ namespace tasker {
         bool operator!=(const CancellationToken& other) const noexcept;
 
         void cancel() noexcept;
-        bool isCanceled() const noexcept;
+        [[nodiscard]] bool isCanceled() const noexcept;
 
       private:
         struct Impl;
@@ -60,5 +59,4 @@ namespace tasker {
         return _impl->canceled.load();
     }
 
-} // namespace tasker
-} // namespace vanilo
+} // namespace vanilo::tasker
