@@ -40,7 +40,7 @@ namespace vanilo::core {
     /**
      * Tracer helper class.
      */
-    class Tracer final
+    class VANILO_EXPORT Tracer final
     {
       public:
         Tracer(const char* filename, unsigned line) noexcept;
