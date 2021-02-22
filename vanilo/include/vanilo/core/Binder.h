@@ -1,6 +1,7 @@
 #ifndef INC_532A9E9148F343228FB5256DE9C99443
 #define INC_532A9E9148F343228FB5256DE9C99443
 
+#include <vanilo/core/Traits.h>
 #include <vanilo/core/Utility.h>
 
 namespace vanilo::core::binder {
@@ -41,80 +42,29 @@ namespace vanilo::core::binder {
             }
         };
 
-        /// Member function
-        /// ========================================================================
-        template <typename Signature>
-        struct MemberFuncArity;
-
-#define MEMBER_FUNC_ARITY2(CV, REF, L_VAL, R_VAL)                      \
-    template <typename Result, typename Class, typename... Args>       \
-    struct MemberFuncArity<Result (Class::*)(Args...) CV REF>          \
-    {                                                                  \
-        using value = std::integral_constant<size_t, sizeof...(Args)>; \
-    };
-
-#define MEMBER_FUNC_ARITY(REF, L_VAL, R_VAL)      \
-    MEMBER_FUNC_ARITY2(, REF, LVAL, RVAL)         \
-    MEMBER_FUNC_ARITY2(const, REF, LVAL, RVAL)    \
-    MEMBER_FUNC_ARITY2(volatile, REF, LVAL, RVAL) \
-    MEMBER_FUNC_ARITY2(const volatile, REF, LVAL, RVAL)
-
-        MEMBER_FUNC_ARITY(, true_type, true_type)
-        MEMBER_FUNC_ARITY(&, true_type, false_type)
-        MEMBER_FUNC_ARITY(&&, false_type, true_type)
-        MEMBER_FUNC_ARITY(noexcept, true_type, true_type)
-        MEMBER_FUNC_ARITY(&noexcept, true_type, false_type)
-        MEMBER_FUNC_ARITY(&&noexcept, false_type, true_type)
-
-#undef MEMBER_FUNC_ARITY
-#undef MEMBER_FUNC_ARITY2
-
-        template <typename MemberFuncPtr, bool IsMemberFunc = std::is_member_function_pointer<MemberFuncPtr>::value>
-        struct MemberFuncBase
-        {
-            using Arity = typename MemberFuncArity<std::remove_cv_t<MemberFuncPtr>>::value;
-        };
-
-        template <typename MemberObjPtr>
-        class MemberFuncBase<MemberObjPtr, false>
-        {
-            using Arity   = std::integral_constant<std::size_t, 0>;
-            using Varargs = std::false_type;
-        };
-
-        template <typename MemberPointer>
-        struct MemberFunc;
-
-        template <typename Result, typename Class>
-        struct MemberFunc<Result Class::*>: MemberFuncBase<Result Class::*>
-        {
-        };
-
         /// ArityChecker
-        /// ========================================================================
+        /// ========================================================================================
         template <typename Func, typename... Args>
         struct ArityChecker
         {
-            static constexpr bool IsMemberFunction = false;
         };
 
         template <typename Return, typename... Args, typename... BoundArgs>
         struct ArityChecker<Return (*)(Args...), BoundArgs...>
         {
             static_assert(sizeof...(BoundArgs) == sizeof...(Args), "Wrong number of arguments for function");
-            static constexpr bool IsMemberFunction = true;
         };
 
         template <typename Result, typename Class, typename... BoundArgs>
         struct ArityChecker<Result Class::*, BoundArgs...>
         {
-            using Arity = typename MemberFunc<Result Class::*>::Arity;
-            static_assert(sizeof...(BoundArgs) == Arity::value + 1, "Wrong number of arguments for pointer-to-member");
-            static constexpr bool IsMemberFunction = true;
+            static_assert(
+                sizeof...(BoundArgs) == traits::FunctionTraits<Result Class::*>::Arity + 1,
+                "Wrong number of arguments for pointer-to-member");
         };
 
         /// Bind
-        /// ========================================================================
+        /// ========================================================================================
 
         /**
          * Type of the function object returned from bind().
@@ -158,28 +108,14 @@ namespace vanilo::core::binder {
             template <typename Func, typename... Args>
             auto rebindPrepend(Func&& func, Args&&... args)
             {
-                constexpr bool isMemFunc = ArityChecker<Functor, BoundArgs...>::IsMemberFunction;
-                constexpr auto size      = std::tuple_size_v<std::tuple<BoundArgs...>>;
-                using NewIndices         = std::make_index_sequence<size - isMemFunc>;
-                using SelectedIndices    = typename OffsetSequence<isMemFunc, std::make_index_sequence<size - isMemFunc>>::Type;
+                constexpr auto isMemberFn = traits::FunctionTraits<Func>::IsMemberFnPtr;
+                constexpr auto argsCount  = std::tuple_size_v<std::tuple<BoundArgs...>>;
+                using NewIndices          = std::make_index_sequence<argsCount - isMemberFn>;
+                using SelectedIndices     = typename OffsetSequence<isMemberFn, std::make_index_sequence<argsCount - isMemberFn>>::Type;
 
-                return this->test(
+                return this->rebind(
                     std::forward<Func>(func), std::forward_as_tuple(std::forward<Args>(args)...),
                     TupleHelper::select(std::move(_boundArgs), SelectedIndices{}), IndexSequence<Args...>{}, NewIndices{});
-            }
-
-            template <typename Func, typename... Args1, typename... Args2, std::size_t... Indexes1, std::size_t... Indexes2>
-            auto test(
-                Func&& func,
-                std::tuple<Args1...>&& args1,
-                std::tuple<Args2...>&& args2,
-                std::index_sequence<Indexes1...>,
-                std::index_sequence<Indexes2...>)
-            {
-                using BindType = typename internal::BindHelper<Func, Args1..., Args2...>::Type;
-                return BindType(
-                    std::forward<Func>(func), std::forward<Args1>(std::get<Indexes1>(args1))...,
-                    std::forward<Args2>(std::get<Indexes2>(args2))...);
             }
 
             template <typename Result = ResultType<Functor, BoundArgs...>>
@@ -193,6 +129,20 @@ namespace vanilo::core::binder {
             Result call(std::index_sequence<Indexes...>)
             {
                 return std::__invoke(_functor, Mapper<BoundArgs>()(std::get<Indexes>(_boundArgs))...);
+            }
+
+            template <typename Func, typename... Args1, typename... Args2, std::size_t... Indexes1, std::size_t... Indexes2>
+            auto rebind(
+                Func&& func,
+                std::tuple<Args1...>&& args1,
+                std::tuple<Args2...>&& args2,
+                std::index_sequence<Indexes1...>,
+                std::index_sequence<Indexes2...>)
+            {
+                using BindType = typename internal::BindHelper<Func, Args1..., Args2...>::Type;
+                return BindType(
+                    std::forward<Func>(func), std::forward<Args1>(std::get<Indexes1>(args1))...,
+                    std::forward<Args2>(std::get<Indexes2>(args2))...);
             }
 
             Functor _functor;
