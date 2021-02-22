@@ -11,13 +11,13 @@ namespace vanilo::core::binder {
          * Maps an argument to bind() into an actual argument to the bound function object.
          */
         template <typename Arg, bool = false>
-        class Mapper;
+        class BindUnwrapper;
 
         /**
          * If the argument is std::reference_wrapper<Arg>, returns the underlying reference.
          */
         template <typename Arg>
-        class Mapper<std::reference_wrapper<Arg>, false>
+        class BindUnwrapper<std::reference_wrapper<Arg>, false>
         {
           public:
             template <typename CvRef>
@@ -32,7 +32,7 @@ namespace vanilo::core::binder {
          *  The cv-qualifiers on the reference are determined by the caller.
          */
         template <typename Arg>
-        class Mapper<Arg, false>
+        class BindUnwrapper<Arg, false>
         {
           public:
             template <typename CvArg>
@@ -86,10 +86,10 @@ namespace vanilo::core::binder {
             using IndexSequence = std::make_index_sequence<sizeof...(Args)>;
 
             template <typename BoundArg>
-            using MapperType = decltype(Mapper<typename std::remove_cv<BoundArg>::type>()(std::declval<BoundArg&>()));
+            using UnwrapperType = decltype(BindUnwrapper<typename std::remove_cv<BoundArg>::type>()(std::declval<BoundArg&>()));
 
-            template <typename Func, typename... BArgs>
-            using ResultType = typename std::result_of<Func&(MapperType<BArgs>&&...)>::type;
+            template <typename Func, typename... Args>
+            using ResultType = typename std::result_of<Func&(UnwrapperType<Args>&&...)>::type;
 
           public:
             Bind(const Bind& other)     = default;
@@ -128,7 +128,7 @@ namespace vanilo::core::binder {
             template <typename Result, std::size_t... Indexes>
             Result call(std::index_sequence<Indexes...>)
             {
-                return std::__invoke(_functor, Mapper<BoundArgs>()(std::get<Indexes>(_boundArgs))...);
+                return std::__invoke(_functor, BindUnwrapper<BoundArgs>()(std::get<Indexes>(_boundArgs))...);
             }
 
             template <typename Func, typename... Args1, typename... Args2, std::size_t... Indexes1, std::size_t... Indexes2>
