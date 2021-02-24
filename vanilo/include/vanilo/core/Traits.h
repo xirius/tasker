@@ -26,10 +26,10 @@ namespace vanilo::core::traits {
         template <typename TReturn, typename... Args>
         struct FunctionTraitsBase<TReturn (*)(Args...)>
         {
-            static constexpr auto arity = sizeof...(Args);
             using ReturnType            = TReturn;
             using ClassType             = void;
             using ArgTypes              = typename std::tuple<Args...>;
+            static constexpr auto Arity = sizeof...(Args);
         };
 
 #define FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)             \
@@ -58,6 +58,7 @@ namespace vanilo::core::traits {
 #undef FUNCTION_TRAITS
 #undef FUNCTION_TRAITS_TEMPLATE
 
+        /// Lambda functions' traits
         template <typename Signature>
         struct FunctionTraitsBase<Signature, std::void_t<decltype(&Signature::operator())>>
             : public FunctionTraitsBase<decltype(&Signature::operator())>
