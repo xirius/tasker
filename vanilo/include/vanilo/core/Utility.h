@@ -29,23 +29,6 @@ namespace vanilo::core {
         }
     };
 
-    /// FuncArgs
-    /// ========================================================================
-    template <typename Func, typename... Args>
-    struct FuncArgs
-    {
-    };
-
-    template <typename Return, typename... Args, typename... BoundArgs>
-    struct FuncArgs<Return (*)(Args...), BoundArgs...>
-    {
-    };
-
-    template <typename Result, typename Class, typename... BoundArgs>
-    struct FuncArgs<Result Class::*, BoundArgs...>
-    {
-    };
-
 } // namespace vanilo::core
 
 #endif // INC_17E2C0F764D04CBA82065789EC6CA7E5

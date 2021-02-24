@@ -4,6 +4,7 @@
 #include <tuple>
 
 namespace vanilo::core::traits {
+
     namespace details {
 
         template <typename Signature, typename = void>
@@ -21,6 +22,15 @@ namespace vanilo::core::traits {
     };
 
     namespace details {
+
+        template <typename TReturn, typename... Args>
+        struct FunctionTraitsBase<TReturn (*)(Args...)>
+        {
+            static constexpr auto arity = sizeof...(Args);
+            using ReturnType            = TReturn;
+            using ClassType             = void;
+            using ArgTypes              = typename std::tuple<Args...>;
+        };
 
 #define FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)             \
     template <typename TReturn, typename TClass, typename... Args>  \

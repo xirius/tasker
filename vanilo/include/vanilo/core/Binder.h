@@ -63,12 +63,9 @@ namespace vanilo::core::binder {
                 "Wrong number of arguments for pointer-to-member");
         };
 
-        /// Bind
+        /// Bind | Type of the function object returned from bind().
         /// ========================================================================================
 
-        /**
-         * Type of the function object returned from bind().
-         */
         template <typename Signature>
         struct Bind;
 
@@ -85,8 +82,8 @@ namespace vanilo::core::binder {
             template <typename... Args>
             using IndexSequence = std::make_index_sequence<sizeof...(Args)>;
 
-            template <typename BoundArg>
-            using UnwrapperType = decltype(BindUnwrapper<typename std::remove_cv<BoundArg>::type>()(std::declval<BoundArg&>()));
+            template <typename Arg>
+            using UnwrapperType = decltype(BindUnwrapper<typename std::remove_cv<Arg>::type>()(std::declval<Arg&>()));
 
             template <typename Func, typename... Args>
             using ResultType = typename std::result_of<Func&(UnwrapperType<Args>&&...)>::type;
