@@ -105,7 +105,7 @@ namespace vanilo::core::binder {
             template <typename Func, typename... Args>
             auto rebindPrepend(Func&& func, Args&&... args)
             {
-                constexpr auto isMemberFn = traits::FunctionTraits<Func>::IsMemberFnPtr;
+                constexpr auto isMemberFn = traits::FunctionTraits<Functor>::IsMemberFnPtr;
                 constexpr auto argsCount  = std::tuple_size_v<std::tuple<BoundArgs...>>;
                 using NewIndices          = std::make_index_sequence<argsCount - isMemberFn>;
                 using SelectedIndices     = typename OffsetSequence<isMemberFn, std::make_index_sequence<argsCount - isMemberFn>>::Type;

@@ -26,20 +26,22 @@ namespace vanilo::core::traits {
         template <typename TReturn, typename... Args>
         struct FunctionTraitsBase<TReturn (*)(Args...)>
         {
-            using ReturnType            = TReturn;
-            using ClassType             = void;
-            using ArgTypes              = typename std::tuple<Args...>;
-            static constexpr auto Arity = sizeof...(Args);
+            using ReturnType               = TReturn;
+            using ClassType                = void;
+            using ArgTypes                 = typename std::tuple<Args...>;
+            static constexpr auto Arity    = sizeof...(Args);
+            static constexpr bool IsLambda = false;
         };
 
-#define FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)             \
-    template <typename TReturn, typename TClass, typename... Args>  \
-    struct FunctionTraitsBase<TReturn (TClass::*)(Args...) CV REF>  \
-    {                                                               \
-        using ReturnType            = TReturn;                      \
-        using ClassType             = TClass;                       \
-        using ArgTypes              = typename std::tuple<Args...>; \
-        static constexpr auto Arity = sizeof...(Args);              \
+#define FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)                \
+    template <typename TReturn, typename TClass, typename... Args>     \
+    struct FunctionTraitsBase<TReturn (TClass::*)(Args...) CV REF>     \
+    {                                                                  \
+        using ReturnType               = TReturn;                      \
+        using ClassType                = TClass;                       \
+        using ArgTypes                 = typename std::tuple<Args...>; \
+        static constexpr auto Arity    = sizeof...(Args);              \
+        static constexpr bool IsLambda = false;                        \
     };
 
 #define FUNCTION_TRAITS(REF, L_VAL, R_VAL)              \
@@ -63,6 +65,7 @@ namespace vanilo::core::traits {
         struct FunctionTraitsBase<Signature, std::void_t<decltype(&Signature::operator())>>
             : public FunctionTraitsBase<decltype(&Signature::operator())>
         {
+            static constexpr bool IsLambda = true;
         };
 
     } // namespace details
