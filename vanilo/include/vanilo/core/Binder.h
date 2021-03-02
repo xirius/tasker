@@ -7,41 +7,6 @@
 namespace vanilo::core::binder {
     namespace internal {
 
-        /**
-         * Maps an argument to bind() into an actual argument to the bound function object.
-         */
-        template <typename Arg, bool = false>
-        class BindUnwrapper;
-
-        /**
-         * If the argument is std::reference_wrapper<Arg>, returns the underlying reference.
-         */
-        template <typename Arg>
-        class BindUnwrapper<std::reference_wrapper<Arg>, false>
-        {
-          public:
-            template <typename CvRef>
-            Arg& operator()(CvRef& arg) const volatile
-            {
-                return arg.get();
-            }
-        };
-
-        /**
-         *  If the argument is just a value, returns a reference to that value.
-         *  The cv-qualifiers on the reference are determined by the caller.
-         */
-        template <typename Arg>
-        class BindUnwrapper<Arg, false>
-        {
-          public:
-            template <typename CvArg>
-            CvArg&& operator()(CvArg&& arg) const volatile
-            {
-                return std::forward<CvArg>(arg);
-            }
-        };
-
         /// ArityChecker
         /// ========================================================================================
         template <typename Func, typename... Args>
@@ -83,10 +48,11 @@ namespace vanilo::core::binder {
             using IndexSequence = std::make_index_sequence<sizeof...(Args)>;
 
             template <typename Arg>
-            using UnwrapperType = decltype(BindUnwrapper<typename std::remove_cv<Arg>::type>()(std::declval<Arg&>()));
+            using UnwrapperType = decltype(RefUnwrapper<typename std::remove_cv<Arg>::type>()(std::declval<Arg&>()));
 
             template <typename Func, typename... Args>
-            using ResultType = typename std::result_of<Func&(UnwrapperType<Args>&&...)>::type;
+            // using ResultType = typename std::result_of<Func&(UnwrapperType<Args>&&...)>::type;
+            using ResultType = typename traits::FunctionTraits<Func>::ReturnType;
 
           public:
             Bind(const Bind& other)     = default;
@@ -105,27 +71,30 @@ namespace vanilo::core::binder {
             template <typename Func, typename... Args>
             auto rebindPrepend(Func&& func, Args&&... args)
             {
-                constexpr auto isMemberFn = traits::FunctionTraits<Functor>::IsMemberFnPtr;
-                constexpr auto argsCount  = std::tuple_size_v<std::tuple<BoundArgs...>>;
-                using NewIndices          = std::make_index_sequence<argsCount - isMemberFn>;
-                using SelectedIndices     = typename OffsetSequence<isMemberFn, std::make_index_sequence<argsCount - isMemberFn>>::Type;
+                constexpr auto isMember  = traits::FunctionTraits<Functor>::IsMemberFnPtr;
+                constexpr auto argsCount = std::tuple_size_v<std::tuple<BoundArgs...>>;
+                using NewIndices         = std::make_index_sequence<argsCount - isMember>;
+                using SelectedIndices    = typename OffsetSequence<isMember, std::make_index_sequence<argsCount - isMember>>::Type;
 
                 return this->rebind(
                     std::forward<Func>(func), std::forward_as_tuple(std::forward<Args>(args)...),
                     TupleHelper::select(std::move(_boundArgs), SelectedIndices{}), IndexSequence<Args...>{}, NewIndices{});
             }
 
-            template <typename Result = ResultType<Functor, BoundArgs...>>
-            Result operator()()
+            template <typename... Args, typename Result = ResultType<Functor, BoundArgs...>>
+            Result operator()(Args&&... args)
             {
-                return this->call<Result>(IndexSequence<BoundArgs...>{});
+                return this->call<Result>(
+                    std::forward_as_tuple(std::forward<Args>(args)...), IndexSequence<BoundArgs...>{}, IndexSequence<Args...>{});
             }
 
           private:
-            template <typename Result, std::size_t... Indexes>
-            Result call(std::index_sequence<Indexes...>)
+            template <typename Result, typename... Args, std::size_t... Indexes1, std::size_t... Indexes2>
+            Result call(std::tuple<Args...> args, std::index_sequence<Indexes1...>, std::index_sequence<Indexes2...>)
             {
-                return std::__invoke(_functor, BindUnwrapper<BoundArgs>()(std::get<Indexes>(_boundArgs))...);
+                return std::__invoke(
+                    _functor, RefUnwrapper<BoundArgs>()(std::get<Indexes1>(_boundArgs))...,
+                    RefUnwrapper<Args>()(std::get<Indexes2>(args))...);
             }
 
             template <typename Func, typename... Args1, typename... Args2, std::size_t... Indexes1, std::size_t... Indexes2>

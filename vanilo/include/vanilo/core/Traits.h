@@ -5,43 +5,67 @@
 
 namespace vanilo::core::traits {
 
-    namespace details {
+    namespace internal {
 
         template <typename Signature, typename = void>
         struct FunctionTraitsBase;
 
-    } // namespace details
+    } // namespace internal
 
     /// Function traits
-    /// ========================================================================
+    /// ============================================================================================
 
     template <typename Signature>
-    struct FunctionTraits: details::FunctionTraitsBase<Signature>
+    struct FunctionTraits: internal::FunctionTraitsBase<Signature>
     {
         static constexpr bool IsMemberFnPtr = std::is_member_function_pointer<Signature>::value;
     };
 
-    namespace details {
+    namespace internal {
+
+        template <typename... Args>
+        struct Arguments
+        {
+            template <std::size_t N>
+            using Element = typename std::tuple_element<N, std::tuple<Args...>>::type;
+        };
+
+        template <>
+        struct Arguments<>
+        {
+            template <std::size_t N>
+            using Element = void;
+        };
 
         template <typename TReturn, typename... Args>
         struct FunctionTraitsBase<TReturn (*)(Args...)>
         {
-            using ReturnType               = TReturn;
-            using ClassType                = void;
-            using ArgTypes                 = typename std::tuple<Args...>;
+            using ReturnType   = TReturn;
+            using ClassType    = void;
+            using ArgsType     = typename std::tuple<Args...>;
+            using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>;
+
+            template <std::size_t N>
+            using Arg = typename Arguments<Args...>::template Element<N>;
+
             static constexpr auto Arity    = sizeof...(Args);
             static constexpr bool IsLambda = false;
         };
 
-#define FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)                \
-    template <typename TReturn, typename TClass, typename... Args>     \
-    struct FunctionTraitsBase<TReturn (TClass::*)(Args...) CV REF>     \
-    {                                                                  \
-        using ReturnType               = TReturn;                      \
-        using ClassType                = TClass;                       \
-        using ArgTypes                 = typename std::tuple<Args...>; \
-        static constexpr auto Arity    = sizeof...(Args);              \
-        static constexpr bool IsLambda = false;                        \
+#define FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)                               \
+    template <typename TReturn, typename TClass, typename... Args>                    \
+    struct FunctionTraitsBase<TReturn (TClass::*)(Args...) CV REF>                    \
+    {                                                                                 \
+        using ReturnType   = TReturn;                                                 \
+        using ClassType    = TClass;                                                  \
+        using ArgsType     = typename std::tuple<Args...>;                            \
+        using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>; \
+                                                                                      \
+        template <std::size_t N>                                                      \
+        using Arg = typename Arguments<Args...>::template Element<N>;                 \
+                                                                                      \
+        static constexpr auto Arity    = sizeof...(Args);                             \
+        static constexpr bool IsLambda = false;                                       \
     };
 
 #define FUNCTION_TRAITS(REF, L_VAL, R_VAL)              \
@@ -68,7 +92,7 @@ namespace vanilo::core::traits {
             static constexpr bool IsLambda = true;
         };
 
-    } // namespace details
+    } // namespace internal
 } // namespace vanilo::core::traits
 
 #endif // INC_5CCBDE6C07F04D0090FDBF17F4FDADC7

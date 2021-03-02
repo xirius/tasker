@@ -2,45 +2,71 @@
 #define INC_CF1B33A15FDE47BDA967EACB24A90BED
 
 #include <vanilo/Export.h>
+#include <vanilo/core/Binder.h>
+#include <vanilo/core/Tracer.h>
 #include <vanilo/tasker/CancellationToken.h>
 
+#include <any>
 #include <cassert>
 #include <future>
 #include <iostream>
-#include <memory>
-#include <optional>
 
 namespace vanilo::tasker {
 
+    /// Cancellation exception
+    /// ============================================================================================
+
+    /**
+     * This exception occur when you're waiting for a result, then a cancellation is notified.
+     */
+    class CancellationException final: public std::exception
+    {
+      public:
+        [[nodiscard]] const char* what() const noexcept override
+        {
+            return "A task was canceled.";
+        }
+    };
+
+    /**
+     * Object that manages the execution of the scheduled tasks.
+     */
     class TaskExecutor;
 
     /// Task interface
-    /// ========================================================================
+    /// ============================================================================================
 
-    class Task
+    class VANILO_EXPORT Task
     {
+      protected:
+        template <typename Signature>
+        class Builder;
+
       public:
+        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<TaskFunc>>
+        static TaskBuilder run(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
         virtual ~Task() = default;
 
         virtual void run() = 0;
     };
 
     /// TaskExecutor interface
-    /// ========================================================================
+    /// ============================================================================================
 
     class TaskExecutor
     {
       public:
         virtual ~TaskExecutor() = default;
 
-        virtual size_t count() const                    = 0;
+        [[nodiscard]] virtual size_t count() const      = 0;
         virtual void submit(std::unique_ptr<Task> task) = 0;
     };
 
     /// QueuedTaskExecutor interface
-    /// ========================================================================
+    /// ============================================================================================
 
-    class QueuedTaskExecutor: public TaskExecutor
+    class VANILO_EXPORT QueuedTaskExecutor: public TaskExecutor
     {
       public:
         static std::unique_ptr<QueuedTaskExecutor> create();
@@ -52,90 +78,108 @@ namespace vanilo::tasker {
         virtual size_t process(size_t maxCount) = 0;
     };
 
-    /**
-     * This exception occur when you're waiting for a result, then a cancellation is notified.
-     */
-    class CancellationException final: public std::exception
+    /// ThreadPoolExecutor interface
+    /// ============================================================================================
+
+    class VANILO_EXPORT ThreadPoolExecutor: public TaskExecutor
     {
       public:
-        const char* what() const noexcept override
-        {
-            return "A task was canceled.";
-        }
+        static std::unique_ptr<ThreadPoolExecutor> create();
+
+        /**
+         * @param maxCount the maximum number of task to process.
+         * @return the number of tasks that still need to be processed.
+         */
+        virtual size_t process(size_t maxCount) = 0;
     };
 
-    namespace details {
+    namespace internal {
 
-        /**
-         * Holds cancellation token and exception callback of the current task.
-         */
-        class TaskContext
+        class ChainableTask;
+
+        /// Base task builder
+        /// ========================================================================================
+
+        class BaseTaskBuilder
         {
+            friend Task;
+
           public:
-            TaskContext() = default;
+            // Disabled copy assignment and copy construction to force only one operation on the object.
+            BaseTaskBuilder(const BaseTaskBuilder& other) = delete;
 
-            explicit TaskContext(CancellationToken token): _token{std::move(token)}
-            {
-            }
+            // Disabled copy assignment and copy construction to force only one operation on the object.
+            BaseTaskBuilder& operator=(const BaseTaskBuilder& other) = delete;
 
-            bool isCanceled() const noexcept
-            {
-                return _token.isCanceled();
-            }
+            virtual ~BaseTaskBuilder();
 
-            bool hasExceptionCallback() const noexcept
-            {
-                return (bool)_onException;
-            }
+          protected:
+            explicit BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* last);
 
-            void onException(const std::exception& ex) const
-            {
-                if (_onException) {
-                    _onException(ex);
-                }
-                else {
-                    std::cerr << "An unhandled exception occurred during task execution. Message: " << ex.what() << std::endl;
-                }
-            }
-
-            void setExceptionCallback(std::function<void(const std::exception&)> callback)
-            {
-                _onException = std::move(callback);
-            }
-
-          private:
-            std::function<void(const std::exception&)> _onException;
-            CancellationToken _token;
+            std::unique_ptr<internal::ChainableTask> _task;
+            internal::ChainableTask* _last;
         };
+    } // namespace internal
+
+    /// Task::Builder declaration
+    /// ============================================================================================
+
+    template <typename Signature>
+    class Task::Builder: public internal::BaseTaskBuilder
+    {
+        friend Task;
+
+      public:
+        using ResultType = typename core::traits::FunctionTraits<Signature>::ReturnType;
+        using FirstArg   = typename core::traits::FunctionTraits<Signature>::template Arg<0>;
+        using PureArgs   = typename core::traits::FunctionTraits<Signature>::PureArgsType;
+
+        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<TaskFunc>>
+        TaskBuilder then(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
+      private:
+        using BaseTaskBuilder::BaseTaskBuilder;
+    };
+
+    namespace internal {
 
         /**
-         * Base class of a chainable task.
+         * Generic task specialization.
+         * @tparam Callable The type of the task
+         * @tparam Result The result type returned by the task
+         * @tparam Arg The type of the argument  which is taken by the task
          */
-        class LinkedTask: public Task
+        template <typename Callable, typename Result, typename Arg>
+        class Invocable;
+
+        /**
+         * Represents an abstract generic chainable task.
+         */
+        class ChainableTask: public Task
         {
           public:
-            explicit LinkedTask(TaskExecutor* executor): _executor{executor}
+            explicit ChainableTask(TaskExecutor* executor): _executor{executor}
             {
             }
 
-            void setContext(TaskContext context)
+            [[nodiscard]] inline TaskExecutor* getExecutor() const
             {
-                _context = std::move(context);
+                return _executor;
             }
 
-            void setNext(std::unique_ptr<LinkedTask> task)
+            void setToken(CancellationToken token)
+            {
+                _token = std::move(token);
+            }
+
+            void setNext(std::unique_ptr<ChainableTask> task)
             {
                 assert(task && "Task cannot be null!");
                 _next = std::move(task);
             }
 
           protected:
-            template <typename Callable, typename Result, typename Arg>
-            friend class BaseTask;
-
-            virtual void handleException() = 0;
-
-            LinkedTask* lastTask()
+            ChainableTask* lastTask()
             {
                 auto task = this;
 
@@ -148,24 +192,23 @@ namespace vanilo::tasker {
 
             inline void scheduleNext()
             {
-                _next->setContext(std::move(_context));
+                _next->setToken(std::move(_token));
                 _next->_executor->submit(std::move(_next));
             }
 
-            TaskContext _context;
             TaskExecutor* _executor;
-            std::unique_ptr<LinkedTask> _next;
+            CancellationToken _token;
+            std::unique_ptr<ChainableTask> _next;
         };
 
         /**
-         * Argument dependent generic chainable task.
-         * @tparam Arg
+         * Represents an abstract argument dependent generic chainable task.
          */
         template <typename Arg>
-        class ParametricTask: public LinkedTask
+        class ParameterizedChainableTask: public ChainableTask
         {
           public:
-            using LinkedTask::LinkedTask;
+            using ChainableTask::ChainableTask;
 
             void setArgument(Arg&& arg)
             {
@@ -177,135 +220,334 @@ namespace vanilo::tasker {
         };
 
         /**
-         * Argument dependent generic chainable task specialization in case the argument is void.
+         * Represents a specialization of an abstract generic chainable task without parameter.
          */
         template <>
-        class ParametricTask<void>: public LinkedTask
+        class ParameterizedChainableTask<void>: public ChainableTask
         {
           public:
-            using LinkedTask::LinkedTask;
+            using ChainableTask::ChainableTask;
         };
 
-        /**
-         * Generic task returning Result and taking Arg as a parameter.
-         * @tparam Callable The type of the task
-         * @tparam Result The result type returned by the task
-         * @tparam Arg The argument type of the task
-         */
         template <typename Callable, typename Result, typename Arg>
-        class BaseTask: public ParametricTask<Arg>
+        class BaseTask: public ParameterizedChainableTask<Arg>
         {
+            using ErrorHandler = bool (*)(TaskExecutor* executor, Callable&, std::any&, const std::exception_ptr&);
+
           public:
-            explicit BaseTask(TaskExecutor* executor, Callable&& task): ParametricTask<Arg>{executor}, _task{std::move(task)}
+            explicit BaseTask(TaskExecutor* executor, Callable&& task)
+                : ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}, _errorExecutor{nullptr},
+                  _errorHandler{[](TaskExecutor* executor, Callable&, std::any&, const std::exception_ptr&) { return false; }}
             {
             }
 
-            std::future<Result> getFuture()
+            template <typename Functor, typename... Args>
+            void setupExceptionCallback(TaskExecutor* executor, Functor&& functor, Args... args)
             {
-                _promise.emplace();
-                return _promise->get_future();
+                _errorExecutor = executor;
+                _errorMetadata = std::make_any<std::tuple<Functor, std::tuple<Args...>>>(
+                    std::make_tuple(std::forward<Functor>(functor), std::make_tuple(std::forward<Args>(args)...)));
+
+                _errorHandler = [](TaskExecutor* executor, Callable& task, std::any& metadata, const std::exception_ptr& exPtr) {
+                    auto exceptionTask = core::binder::bind(
+                        [](Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
+                            auto [func, args] = std::move(std::any_cast<std::tuple<Functor, std::tuple<Args...>>>(metadata));
+
+                            try {
+                                try {
+                                    std::rethrow_exception(exPtr);
+                                }
+                                catch (std::exception& ex) {
+                                    task.rebindPrepend(
+                                        std::forward<Functor>(func), std::forward<Args>(std::get<Args>(args))..., std::ref(ex))();
+                                }
+                            }
+                            catch (...) {
+                                /// Ignore or log the error coming form the exception handler callback
+                                std::cout << "WTF !!!!!" << std::endl;
+                                TRACE("WTF !!!!!");
+                            }
+                        },
+                        std::move(task), std::move(metadata), exPtr);
+
+                    // If there is an another executor to schedule the task on
+                    auto invocable =
+                        std::make_unique<internal::Invocable<decltype(exceptionTask), void, void>>(executor, std::move(exceptionTask));
+                    invocable->run();
+                    // else
+                    // exceptionTask();
+
+                    return true; // Exception was handled
+                };
             }
 
           protected:
-            inline void dispatchException()
+            void handleException(const std::exception_ptr& exPtr)
             {
-                LinkedTask* task = this->lastTask();
-                task->setContext(std::move(this->_context));
-                task->handleException();
+                _errorHandler(_errorExecutor, _task, _errorMetadata, exPtr);
             }
 
-            inline bool hasPromise() const noexcept
+            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
+            inline Result executeTask()
             {
-                return _promise.has_value();
+                return _task();
             }
 
-            template <typename T>
-            inline void setPromiseValue(T&& value)
+            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
+            inline Result executeTask()
             {
-                _promise->set_value(std::forward<T>(value));
+                return invoke(this->_param);
             }
 
-            inline Callable& task()
+            template <typename Param, typename = std::enable_if_t<!core::IsTuple<Param>::value>>
+            inline Result invoke(Param& param)
             {
-                return _task;
+                return _task(param);
+            }
+
+            template <typename... Args, typename Packed = std::tuple<Args...>, typename = std::enable_if_t<core::IsTuple<Packed>::value>>
+            inline Result invoke(std::tuple<Args...>& args)
+            {
+                return core::InvokeHelper<Result>::invoke(_task, args, std::make_index_sequence<sizeof...(Args)>{});
             }
 
           private:
-            void handleException() override
-            {
-                try {
-                    if (this->_context.hasExceptionCallback()) {
-                        onFailure();
-                    }
-                    else if (_promise) { // If std::future was taken.
-                        _promise->set_exception(std::current_exception());
-                    }
-                }
-                catch (...) {
-                    // set_exception() or onFailure may throw too. Ignore it.
-                }
-            }
-
-            inline void onFailure() const
-            {
-                try {
-                    std::rethrow_exception(std::current_exception());
-                }
-                catch (const std::exception& ex) {
-                    this->_context.onException(ex);
-                }
-                catch (...) {
-                    this->_context.onException(std::runtime_error{"Unknown error occurred during execution of the task."});
-                }
-            }
-
-            std::optional<std::promise<Result>> _promise;
             Callable _task;
+            TaskExecutor* _errorExecutor{};
+            std::any _errorMetadata;
+            ErrorHandler _errorHandler;
         };
 
-        /**
-         * Generic task specialization.
-         * @tparam Callable The type of the task
-         * @tparam Result The result type returned by the task
-         * @tparam Arg The argument type of the task
-         */
+        // class PromisedInvocable
+
         template <typename Callable, typename Result, typename Arg>
         class Invocable: public BaseTask<Callable, Result, Arg>
         {
           public:
-            using BaseTask<Callable, Result, Arg>::BaseTask;
+            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, Result, Arg>(executor, std::move(task))
+            {
+                std::cout << "class Invocable: public BaseTask<Callable, Result, Arg>" << std::endl; //=====================================
+            }
 
             void run() override
             {
                 try {
                     if (this->_next) {
-                        // Case 1 : we have a next task to execute
-                        auto next = dynamic_cast<ParametricTask<Result>*>(this->_next.get());
-                        next->setArgument(executeTask());
+                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                        next->setArgument(this->executeTask());
                         this->scheduleNext();
                     }
-                    else if (this->hasPromise()) {
-                        // Case 2 : Future was taken
-                        this->setPromiseValue(executeTask());
-                    }
                     else {
-                        // Case 3 : No result and no next task
-                        executeTask();
+                        this->executeTask();
                     }
                 }
                 catch (...) {
-                    this->dispatchException();
+                    this->handleException(std::current_exception());
                 }
-            }
-
-          private:
-            inline Result executeTask()
-            {
-                return this->task()(std::move(this->_param));
             }
         };
 
-    } // namespace details
+        template <typename Callable, typename Result>
+        class Invocable<Callable, Result, void>: public BaseTask<Callable, Result, void>
+        {
+          public:
+            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, Result, void>(executor, std::move(task))
+            {
+                std::cout << "class Invocable<Callable, Result, void>: public BaseTask<Callable, Result, void>" << std::endl; //============
+            }
+
+            void run() override
+            {
+                try {
+                    if (this->_next) {
+                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                        next->setArgument(this->executeTask());
+                        this->scheduleNext();
+                    }
+                    else {
+                        this->executeTask();
+                    }
+                }
+                catch (...) {
+                    this->handleException(std::current_exception());
+                }
+            }
+        };
+
+        template <typename Callable, typename Arg>
+        class Invocable<Callable, void, Arg>: public BaseTask<Callable, void, Arg>
+        {
+          public:
+            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, void, Arg>(executor, std::move(task))
+            {
+                std::cout << "class Invocable<Callable, void, Arg>: public BaseTask<Callable, void, Arg>" << std::endl; //==================
+            }
+
+            void run() override
+            {
+                try {
+                    this->executeTask();
+
+                    if (this->_next) {
+                        this->scheduleNext();
+                    }
+                }
+                catch (...) {
+                    this->handleException(std::current_exception());
+                }
+            }
+        };
+
+        template <typename Callable>
+        class Invocable<Callable, void, void>: public BaseTask<Callable, void, void>
+        {
+          public:
+            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, void, void>(executor, std::move(task))
+            {
+                std::cout << "class Invocable<Callable, void, void>: public BaseTask<Callable, void, void>" << std::endl; //================
+            }
+
+            void run() override
+            {
+                try {
+                    this->executeTask();
+
+                    if (this->_next) {
+                        this->scheduleNext();
+                    }
+                }
+                catch (...) {
+                    this->handleException(std::current_exception());
+                }
+            }
+        };
+
+        /// Base task builder implementation
+        /// ========================================================================================
+
+        inline BaseTaskBuilder::BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* last)
+            : _task{std::move(task)}, _last{last}
+        {
+        }
+
+        inline BaseTaskBuilder::~BaseTaskBuilder()
+        {
+            std::cout << "BaseTaskBuilder::~BaseTaskBuilder()" << std::endl; ///////////////////////////////////////////////////////////////
+
+            if (_task) {
+                std::cout << "BaseTaskBuilder::~BaseTaskBuilder() => if (_task)" << std::endl; /////////////////////////////////////////////
+                _task->getExecutor()->submit(std::move(_task));
+            }
+        }
+
+        /// BuilderHelper implementation
+        /// ========================================================================================
+
+        template <typename Result, typename Arg, bool HasToken>
+        struct BuilderHelper;
+
+        template <typename Result, typename Arg>
+        struct BuilderHelper<Result, Arg, true>
+        {
+            template <typename TaskFunc, typename... Args>
+            static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
+            {
+                auto task = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
+                return std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
+            }
+        };
+
+        template <typename Result, typename Arg>
+        struct BuilderHelper<Result, Arg, false>
+        {
+            template <typename TaskFunc, typename... Args>
+            static auto createInvocable(TaskExecutor* executor, const CancellationToken&, TaskFunc&& func, Args&&... args)
+            {
+                auto task = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+                return std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
+            }
+        };
+
+        /// ArityChecker implementation
+        /// ========================================================================================
+
+        template <typename Expected, typename Right, bool = core::IsTuple<Expected>::value>
+        struct ArityCheckerBase;
+
+        template <typename Expected, typename Right>
+        struct ArityCheckerBase<Expected, Right, true>
+        {
+            static constexpr void validate()
+            {
+                static_assert(std::tuple_size_v<Expected> == std::tuple_size_v<Right>, "Wrong number of arguments");
+                static_assert(std::is_same_v<Expected, Right>, "Wrong argument types");
+            }
+        };
+
+        template <typename Expected, typename Right>
+        struct ArityCheckerBase<Expected, Right, false>
+            : public ArityCheckerBase<std::conditional_t<std::is_same_v<Expected, void>, std::tuple<>, std::tuple<Expected>>, Right>
+        {
+        };
+
+        template <typename Expected, typename Provided>
+        struct ArityChecker;
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<Provided...>>: public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<CancellationToken, Provided...>>
+            : public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<std::exception, Provided...>>: public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<std::exception, CancellationToken, Provided...>>
+            : public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
+    } // namespace internal
+
+    /// Task::Builder implementation
+    /// ============================================================================================
+
+    template <typename Signature>
+    template <typename TaskFunc, typename... Args, typename TaskBuilder>
+    TaskBuilder Task::Builder<Signature>::then(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    {
+        internal::ArityChecker<typename std::decay<ResultType>::type, typename TaskBuilder::PureArgs>::validate();
+        constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
+
+        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, ResultType, HasToken>::createInvocable(
+            executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        auto last = invocable.get();
+
+        _last->setNext(std::move(invocable));
+        return TaskBuilder{std::move(_task), last};
+    }
+
+    /// Task implementation
+    /// ============================================================================================
+
+    template <typename TaskFunc, typename... Args, typename TaskBuilder>
+    TaskBuilder Task::run(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    {
+        constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
+
+        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, HasToken>::createInvocable(
+            executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        auto last = invocable.get();
+
+        return TaskBuilder{std::move(invocable), last};
+    }
 
 } // namespace vanilo::tasker
 

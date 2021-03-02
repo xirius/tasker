@@ -1,4 +1,5 @@
 #pragma once
+#include <vanilo/Export.h>
 
 #include <atomic>
 #include <memory>
@@ -6,9 +7,9 @@
 namespace vanilo::tasker {
 
     /**
-     *
+     * Object used to propagate notification that operations should be canceled.
      */
-    class CancellationToken
+    class VANILO_EXPORT CancellationToken
     {
       public:
         CancellationToken();
@@ -23,40 +24,5 @@ namespace vanilo::tasker {
         struct Impl;
         std::shared_ptr<Impl> _impl;
     };
-
-    /// CancellationToken::Impl
-    /// ========================================================================
-
-    struct CancellationToken::Impl
-    {
-        std::atomic<bool> canceled;
-    };
-
-    /// CancellationToken
-    /// ========================================================================
-
-    inline CancellationToken::CancellationToken(): _impl{std::make_shared<Impl>()}
-    {
-    }
-
-    inline bool CancellationToken::operator==(const CancellationToken& other) const noexcept
-    {
-        return _impl == other._impl;
-    }
-
-    inline bool CancellationToken::operator!=(const CancellationToken& other) const noexcept
-    {
-        return _impl != other._impl;
-    }
-
-    inline void CancellationToken::cancel() noexcept
-    {
-        _impl->canceled.store(true);
-    }
-
-    inline bool CancellationToken::isCanceled() const noexcept
-    {
-        return _impl->canceled.load();
-    }
 
 } // namespace vanilo::tasker
