@@ -167,6 +167,11 @@ namespace vanilo::tasker {
                 return _executor;
             }
 
+            [[nodiscard]] inline CancellationToken getToken() const
+            {
+                return _token;
+            }
+
             void setToken(CancellationToken token)
             {
                 _token = std::move(token);
@@ -450,7 +455,7 @@ namespace vanilo::tasker {
         struct BuilderHelper<Result, Arg, true>
         {
             template <typename TaskFunc, typename... Args>
-            static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
+            inline static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
             {
                 auto task = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
                 return std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
@@ -461,7 +466,7 @@ namespace vanilo::tasker {
         struct BuilderHelper<Result, Arg, false>
         {
             template <typename TaskFunc, typename... Args>
-            static auto createInvocable(TaskExecutor* executor, const CancellationToken&, TaskFunc&& func, Args&&... args)
+            inline static auto createInvocable(TaskExecutor* executor, const CancellationToken&, TaskFunc&& func, Args&&... args)
             {
                 auto task = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Args>(args)...);
                 return std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
@@ -527,7 +532,7 @@ namespace vanilo::tasker {
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
 
         auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, ResultType, HasToken>::createInvocable(
-            executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+            executor, _task->getToken(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
 
         _last->setNext(std::move(invocable));
@@ -542,9 +547,11 @@ namespace vanilo::tasker {
     {
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
 
+        auto token     = CancellationToken();
         auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, HasToken>::createInvocable(
-            executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+            executor, token, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
+        invocable->setToken(std::move(token));
 
         return TaskBuilder{std::move(invocable), last};
     }
