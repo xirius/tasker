@@ -290,12 +290,14 @@ namespace vanilo::tasker {
         template <typename Callable, typename Result, typename Arg>
         class BaseTask: public ParameterizedChainableTask<Arg>
         {
-            using ErrorHandler = bool (*)(TaskExecutor* executor, Callable&, std::any&, const std::exception_ptr&);
+            using ErrorHandler = bool (*)(TaskExecutor* executor, CancellationToken&, Callable&, std::any&, const std::exception_ptr&);
 
           public:
             explicit BaseTask(TaskExecutor* executor, Callable&& task)
                 : ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}, _errorExecutor{nullptr},
-                  _errorHandler{[](TaskExecutor* executor, Callable&, std::any&, const std::exception_ptr&) { return false; }}
+                  _errorHandler{[](TaskExecutor* executor, CancellationToken&, Callable&, std::any&, const std::exception_ptr&) {
+                      return false; // Exception was not handled
+                  }}
             {
             }
 
@@ -306,9 +308,10 @@ namespace vanilo::tasker {
                 _errorMetadata = std::make_any<std::tuple<Functor, std::tuple<Args...>>>(
                     std::make_tuple(std::forward<Functor>(functor), std::forward_as_tuple(std::forward<Args>(args)...)));
 
-                _errorHandler = [](TaskExecutor* executor, Callable& task, std::any& metadata, const std::exception_ptr& exPtr) {
+                _errorHandler = [](TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata,
+                                   const std::exception_ptr& exPtr) {
                     auto exceptionTask = core::binder::bind(
-                        [](Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
+                        [](CancellationToken& token, Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
                             auto [func, args] = std::move(std::any_cast<std::tuple<Functor, std::tuple<Args...>>>(metadata));
 
                             try {
@@ -322,7 +325,7 @@ namespace vanilo::tasker {
 
                                     // Pack exception and optional cancellation token
                                     auto args2 = std::tuple<std::reference_wrapper<std::exception>, CancellationToken>(
-                                        std::ref(ex), CancellationToken{});
+                                        std::ref(ex), std::move(token));
 
                                     rebindAndInvokeCallable(
                                         task, std::forward<Functor>(func), args,
@@ -336,7 +339,7 @@ namespace vanilo::tasker {
                                 TRACE("WTF !!!!!");
                             }
                         },
-                        std::move(task), std::move(metadata), exPtr);
+                        std::move(token), std::move(task), std::move(metadata), exPtr);
 
                     // If there is an another executor to schedule the task on
                     auto invocable =
@@ -352,7 +355,7 @@ namespace vanilo::tasker {
           protected:
             void handleException(const std::exception_ptr& exPtr)
             {
-                _errorHandler(_errorExecutor, _task, _errorMetadata, exPtr);
+                _errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr);
             }
 
             template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
@@ -524,32 +527,48 @@ namespace vanilo::tasker {
         /// BuilderHelper implementation
         /// ========================================================================================
 
-        template <typename Result, typename Arg, bool HasToken>
+        template <typename Result, typename Arg, bool IsMember, bool HasToken>
         struct BuilderHelper;
 
-        template <typename Result, typename Arg>
-        struct BuilderHelper<Result, Arg, true>
+        template <typename Result, typename Arg, bool IsMember>
+        struct BuilderHelper<Result, Arg, IsMember, false>
         {
             template <typename TaskFunc, typename... Args>
-            inline static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
+            static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
             {
-                auto task      = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
+                auto task      = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Args>(args)...);
                 auto invocable = std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
-                invocable->setToken(token);
+                invocable->setToken(std::move(token));
                 return std::move(invocable);
             }
         };
 
         template <typename Result, typename Arg>
-        struct BuilderHelper<Result, Arg, false>
+        struct BuilderHelper<Result, Arg, false, true>
         {
             template <typename TaskFunc, typename... Args>
-            inline static auto createInvocable(TaskExecutor* executor, const CancellationToken&, TaskFunc&& func, Args&&... args)
+            static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
             {
-                auto task = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Args>(args)...);
-                return std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
+                auto task      = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
+                auto invocable = std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
+                invocable->setToken(std::move(token));
+                return std::move(invocable);
             }
         };
+
+        template <typename Result, typename Arg>
+        struct BuilderHelper<Result, Arg, true, true>
+        {
+            template <typename TaskFunc, typename Arg1, typename... Args>
+            static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Arg1&& arg1, Args&&... args)
+            {
+                auto task = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Arg1>(arg1), token, std::forward<Args>(args)...);
+                auto invocable = std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
+                invocable->setToken(std::move(token));
+                return std::move(invocable);
+            }
+        };
+
     } // namespace internal
 
     /// Task::Builder implementation
@@ -561,8 +580,9 @@ namespace vanilo::tasker {
     {
         internal::ArityChecker<typename std::decay<ResultType>::type, typename TaskBuilder::PureArgs>::validate();
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
+        constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
 
-        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, ResultType, HasToken>::createInvocable(
+        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, ResultType, IsMember, HasToken>::createInvocable(
             executor, _task->getToken(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
 
@@ -585,8 +605,9 @@ namespace vanilo::tasker {
     auto Task::run(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
+        constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
 
-        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, HasToken>::createInvocable(
+        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, IsMember, HasToken>::createInvocable(
             executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
 

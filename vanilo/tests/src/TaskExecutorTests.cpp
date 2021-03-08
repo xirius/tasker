@@ -7,7 +7,7 @@ using namespace vanilo::tasker;
 class CustomTask: public Task
 {
   public:
-    CustomTask(int& value): _value{value}
+    explicit CustomTask(int& value): _value{value}
     {
     }
 
@@ -29,7 +29,7 @@ SCENARIO("Test the flow of the QueuedTaskExecutor", "[queued executor]")
         auto task2 = std::make_unique<CustomTask>(value2);
         auto task3 = std::make_unique<CustomTask>(value3);
 
-        auto executor = QueuedTaskExecutor::create();
+        auto executor = LocalThreadExecutor::create();
 
         WHEN("No task are submitted")
         {
