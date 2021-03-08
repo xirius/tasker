@@ -39,12 +39,12 @@ namespace vanilo::tasker {
     class VANILO_EXPORT Task
     {
       protected:
-        template <typename Signature>
+        template <typename Invocable, typename Signature, typename Arg>
         class Builder;
 
       public:
-        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<TaskFunc>>
-        static TaskBuilder run(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, void>>
+        static auto run(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
 
         virtual ~Task() = default;
 
@@ -114,7 +114,7 @@ namespace vanilo::tasker {
             virtual ~BaseTaskBuilder();
 
           protected:
-            explicit BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* last);
+            BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* last);
 
             std::unique_ptr<internal::ChainableTask> _task;
             internal::ChainableTask* _last;
@@ -124,7 +124,7 @@ namespace vanilo::tasker {
     /// Task::Builder declaration
     /// ============================================================================================
 
-    template <typename Signature>
+    template <typename Invocable, typename Signature, typename Arg>
     class Task::Builder: public internal::BaseTaskBuilder
     {
         friend Task;
@@ -134,14 +134,67 @@ namespace vanilo::tasker {
         using FirstArg   = typename core::traits::FunctionTraits<Signature>::template Arg<0>;
         using PureArgs   = typename core::traits::FunctionTraits<Signature>::PureArgsType;
 
-        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<TaskFunc>>
-        TaskBuilder then(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, Arg>>
+        auto then(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
+        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, Arg>>
+        void onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
 
       private:
         using BaseTaskBuilder::BaseTaskBuilder;
     };
 
     namespace internal {
+
+        /// ArityChecker implementation
+        /// ========================================================================================
+
+        template <typename Expected, typename Provided, bool = core::IsTuple<Expected>::value>
+        struct ArityCheckerBase;
+
+        template <typename Expected, typename Provided>
+        struct ArityCheckerBase<Expected, Provided, true>
+        {
+            static constexpr size_t ExpectedArity = std::tuple_size_v<Expected>;
+            static constexpr size_t ProvidedArity = std::tuple_size_v<Provided>;
+
+            static constexpr void validate()
+            {
+                static_assert(std::tuple_size_v<Expected> == std::tuple_size_v<Provided>, "Wrong number of arguments");
+                static_assert(std::is_same_v<Expected, Provided>, "Wrong argument types");
+            }
+        };
+
+        template <typename Expected, typename Right>
+        struct ArityCheckerBase<Expected, Right, false>
+            : public ArityCheckerBase<std::conditional_t<std::is_same_v<Expected, void>, std::tuple<>, std::tuple<Expected>>, Right>
+        {
+        };
+
+        template <typename Expected, typename Provided>
+        struct ArityChecker;
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<Provided...>>: public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<CancellationToken, Provided...>>
+            : public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<std::exception, Provided...>>: public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
+
+        template <typename Expected, typename... Provided>
+        struct ArityChecker<Expected, std::tuple<std::exception, CancellationToken, Provided...>>
+            : public ArityCheckerBase<Expected, std::tuple<Provided...>>
+        {
+        };
 
         /**
          * Generic task specialization.
@@ -183,8 +236,7 @@ namespace vanilo::tasker {
                 _next = std::move(task);
             }
 
-          protected:
-            ChainableTask* lastTask()
+            ChainableTask* getLastTask()
             {
                 auto task = this;
 
@@ -195,9 +247,10 @@ namespace vanilo::tasker {
                 return task;
             }
 
+          protected:
             inline void scheduleNext()
             {
-                _next->setToken(std::move(_token));
+                _next->_token = std::move(_token);
                 _next->_executor->submit(std::move(_next));
             }
 
@@ -247,11 +300,11 @@ namespace vanilo::tasker {
             }
 
             template <typename Functor, typename... Args>
-            void setupExceptionCallback(TaskExecutor* executor, Functor&& functor, Args... args)
+            void setupExceptionCallback(TaskExecutor* executor, Functor&& functor, Args&&... args)
             {
                 _errorExecutor = executor;
                 _errorMetadata = std::make_any<std::tuple<Functor, std::tuple<Args...>>>(
-                    std::make_tuple(std::forward<Functor>(functor), std::make_tuple(std::forward<Args>(args)...)));
+                    std::make_tuple(std::forward<Functor>(functor), std::forward_as_tuple(std::forward<Args>(args)...)));
 
                 _errorHandler = [](TaskExecutor* executor, Callable& task, std::any& metadata, const std::exception_ptr& exPtr) {
                     auto exceptionTask = core::binder::bind(
@@ -263,8 +316,18 @@ namespace vanilo::tasker {
                                     std::rethrow_exception(exPtr);
                                 }
                                 catch (std::exception& ex) {
-                                    task.rebindPrepend(
-                                        std::forward<Functor>(func), std::forward<Args>(std::get<Args>(args))..., std::ref(ex))();
+                                    using TokenArg =
+                                        typename std::decay<typename core::traits::FunctionTraits<Functor>::template Arg<1>>::type;
+                                    constexpr bool HasToken = std::is_same_v<TokenArg, CancellationToken>;
+
+                                    // Pack exception and optional cancellation token
+                                    auto args2 = std::tuple<std::reference_wrapper<std::exception>, CancellationToken>(
+                                        std::ref(ex), CancellationToken{});
+
+                                    rebindAndInvokeCallable(
+                                        task, std::forward<Functor>(func), args,
+                                        std::make_index_sequence<std::tuple_size_v<decltype(args)>>{}, args2,
+                                        std::make_index_sequence<1 + HasToken>{});
                                 }
                             }
                             catch (...) {
@@ -317,9 +380,29 @@ namespace vanilo::tasker {
             }
 
           private:
+            template <typename Functor, typename Args1, std::size_t... Indexes1, typename Args2, std::size_t... Indexes2>
+            inline static void rebindAndInvokeCallable(
+                Callable& task,
+                Functor&& func,
+                Args1& args1,
+                std::index_sequence<Indexes1...>,
+                Args2& args2,
+                std::index_sequence<Indexes2...>)
+            {
+                using BoundedTokenArg = typename std::decay<typename std::decay<decltype(task)>::type::template Element<0>>::type;
+                using ProvidedArgs    = typename core::traits::FunctionTraits<Functor>::PureArgsType;
+
+                constexpr bool HasBoundedToken = std::is_same_v<BoundedTokenArg, CancellationToken>;
+                constexpr auto SelectedArgNum  = ArityChecker<void, ProvidedArgs>::ProvidedArity;
+
+                task.template rebindSelectedPrepend<HasBoundedToken, SelectedArgNum>(
+                    std::forward<Functor>(func), std::move(std::get<Indexes1>(args1))..., std::move(std::get<Indexes2>(args2))...)();
+            }
+
+          private:
             Callable _task;
             TaskExecutor* _errorExecutor{};
-            std::any _errorMetadata;
+            std::any _errorMetadata{};
             ErrorHandler _errorHandler;
         };
 
@@ -331,7 +414,6 @@ namespace vanilo::tasker {
           public:
             explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, Result, Arg>(executor, std::move(task))
             {
-                std::cout << "class Invocable: public BaseTask<Callable, Result, Arg>" << std::endl; //=====================================
             }
 
             void run() override
@@ -358,7 +440,6 @@ namespace vanilo::tasker {
           public:
             explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, Result, void>(executor, std::move(task))
             {
-                std::cout << "class Invocable<Callable, Result, void>: public BaseTask<Callable, Result, void>" << std::endl; //============
             }
 
             void run() override
@@ -385,7 +466,6 @@ namespace vanilo::tasker {
           public:
             explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, void, Arg>(executor, std::move(task))
             {
-                std::cout << "class Invocable<Callable, void, Arg>: public BaseTask<Callable, void, Arg>" << std::endl; //==================
             }
 
             void run() override
@@ -409,7 +489,6 @@ namespace vanilo::tasker {
           public:
             explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, void, void>(executor, std::move(task))
             {
-                std::cout << "class Invocable<Callable, void, void>: public BaseTask<Callable, void, void>" << std::endl; //================
             }
 
             void run() override
@@ -437,10 +516,7 @@ namespace vanilo::tasker {
 
         inline BaseTaskBuilder::~BaseTaskBuilder()
         {
-            std::cout << "BaseTaskBuilder::~BaseTaskBuilder()" << std::endl; ///////////////////////////////////////////////////////////////
-
-            if (_task) {
-                std::cout << "BaseTaskBuilder::~BaseTaskBuilder() => if (_task)" << std::endl; /////////////////////////////////////////////
+            if (_task) { // Schedule task on the executor
                 _task->getExecutor()->submit(std::move(_task));
             }
         }
@@ -457,8 +533,10 @@ namespace vanilo::tasker {
             template <typename TaskFunc, typename... Args>
             inline static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
             {
-                auto task = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
-                return std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
+                auto task      = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
+                auto invocable = std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
+                invocable->setToken(token);
+                return std::move(invocable);
             }
         };
 
@@ -472,61 +550,14 @@ namespace vanilo::tasker {
                 return std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
             }
         };
-
-        /// ArityChecker implementation
-        /// ========================================================================================
-
-        template <typename Expected, typename Right, bool = core::IsTuple<Expected>::value>
-        struct ArityCheckerBase;
-
-        template <typename Expected, typename Right>
-        struct ArityCheckerBase<Expected, Right, true>
-        {
-            static constexpr void validate()
-            {
-                static_assert(std::tuple_size_v<Expected> == std::tuple_size_v<Right>, "Wrong number of arguments");
-                static_assert(std::is_same_v<Expected, Right>, "Wrong argument types");
-            }
-        };
-
-        template <typename Expected, typename Right>
-        struct ArityCheckerBase<Expected, Right, false>
-            : public ArityCheckerBase<std::conditional_t<std::is_same_v<Expected, void>, std::tuple<>, std::tuple<Expected>>, Right>
-        {
-        };
-
-        template <typename Expected, typename Provided>
-        struct ArityChecker;
-
-        template <typename Expected, typename... Provided>
-        struct ArityChecker<Expected, std::tuple<Provided...>>: public ArityCheckerBase<Expected, std::tuple<Provided...>>
-        {
-        };
-
-        template <typename Expected, typename... Provided>
-        struct ArityChecker<Expected, std::tuple<CancellationToken, Provided...>>
-            : public ArityCheckerBase<Expected, std::tuple<Provided...>>
-        {
-        };
-
-        template <typename Expected, typename... Provided>
-        struct ArityChecker<Expected, std::tuple<std::exception, Provided...>>: public ArityCheckerBase<Expected, std::tuple<Provided...>>
-        {
-        };
-
-        template <typename Expected, typename... Provided>
-        struct ArityChecker<Expected, std::tuple<std::exception, CancellationToken, Provided...>>
-            : public ArityCheckerBase<Expected, std::tuple<Provided...>>
-        {
-        };
     } // namespace internal
 
     /// Task::Builder implementation
     /// ============================================================================================
 
-    template <typename Signature>
+    template <typename Invocable, typename Signature, typename Arg>
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
-    TaskBuilder Task::Builder<Signature>::then(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    auto Task::Builder<Invocable, Signature, Arg>::then(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
         internal::ArityChecker<typename std::decay<ResultType>::type, typename TaskBuilder::PureArgs>::validate();
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
@@ -536,24 +567,30 @@ namespace vanilo::tasker {
         auto last = invocable.get();
 
         _last->setNext(std::move(invocable));
-        return TaskBuilder{std::move(_task), last};
+        return Task::Builder<typename decltype(invocable)::element_type, Signature, Arg>{std::move(_task), last};
+    }
+
+    template <typename Invocable, typename Signature, typename Arg>
+    template <typename TaskFunc, typename... Args, typename TaskBuilder>
+    void Task::Builder<Invocable, Signature, Arg>::onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    {
+        auto task = static_cast<Invocable*>(_task->getLastTask());
+        task->setupExceptionCallback(executor, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
     }
 
     /// Task implementation
     /// ============================================================================================
 
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
-    TaskBuilder Task::run(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    auto Task::run(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
 
-        auto token     = CancellationToken();
         auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, HasToken>::createInvocable(
-            executor, token, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+            executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
-        invocable->setToken(std::move(token));
 
-        return TaskBuilder{std::move(invocable), last};
+        return Task::Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(invocable), last};
     }
 
 } // namespace vanilo::tasker
