@@ -55,6 +55,9 @@ namespace vanilo::core::binder {
             using ResultType = typename traits::FunctionTraits<Func>::ReturnType;
 
           public:
+            template <std::size_t N>
+            using Element = typename traits::internal::Arguments<BoundArgs...>::template Element<N>::Type;
+
             Bind(const Bind& other)     = default;
             Bind(Bind&& other) noexcept = default;
 
@@ -71,10 +74,19 @@ namespace vanilo::core::binder {
             template <typename Func, typename... Args>
             auto rebindPrepend(Func&& func, Args&&... args)
             {
-                constexpr auto isMember  = traits::FunctionTraits<Functor>::IsMemberFnPtr;
-                constexpr auto argsCount = std::tuple_size_v<std::tuple<BoundArgs...>>;
-                using NewIndices         = std::make_index_sequence<argsCount - isMember>;
-                using SelectedIndices    = typename OffsetSequence<isMember, std::make_index_sequence<argsCount - isMember>>::Type;
+                return rebindSelectedPrepend<0, sizeof...(BoundArgs)>(std::forward<Func>(func), std::forward<Args>(args)...);
+            }
+
+            template <size_t Offset, size_t Selected, typename Func, typename... Args>
+            auto rebindSelectedPrepend(Func&& func, Args&&... args)
+            {
+                constexpr auto IsMember    = traits::FunctionTraits<Functor>::IsMemberFnPtr;
+                constexpr auto ArgsCount   = sizeof...(BoundArgs) - IsMember;
+                constexpr auto TotalOffset = Offset + IsMember;
+                using NewIndices           = std::make_index_sequence<Selected>;
+                using SelectedIndices      = typename OffsetSequence<TotalOffset, std::make_index_sequence<Selected>>::Type;
+
+                static_assert(Offset + Selected <= ArgsCount, "Out of range: More arguments selected that is bound to the object");
 
                 return this->rebind(
                     std::forward<Func>(func), std::forward_as_tuple(std::forward<Args>(args)...),
