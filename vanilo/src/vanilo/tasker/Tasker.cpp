@@ -4,10 +4,10 @@
 
 using namespace vanilo::tasker;
 
-/// DefaultQueuedTaskExecutor
+/// DefaultLocalThreadExecutor
 /// ============================================================================
 
-class DefaultQueuedTaskExecutor: public QueuedTaskExecutor
+class DefaultLocalThreadExecutor: public LocalThreadExecutor
 {
   public:
     size_t count() const override
@@ -69,7 +69,7 @@ class DefaultQueuedTaskExecutor: public QueuedTaskExecutor
 /// QueuedTaskExecutor
 /// ============================================================================
 
-std::unique_ptr<QueuedTaskExecutor> QueuedTaskExecutor::create()
+std::unique_ptr<LocalThreadExecutor> LocalThreadExecutor::create()
 {
-    return std::make_unique<DefaultQueuedTaskExecutor>();
+    return std::make_unique<DefaultLocalThreadExecutor>();
 }

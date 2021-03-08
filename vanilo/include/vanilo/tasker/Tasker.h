@@ -63,13 +63,13 @@ namespace vanilo::tasker {
         virtual void submit(std::unique_ptr<Task> task) = 0;
     };
 
-    /// QueuedTaskExecutor interface
+    /// LocalThreadExecutor interface
     /// ============================================================================================
 
-    class VANILO_EXPORT QueuedTaskExecutor: public TaskExecutor
+    class VANILO_EXPORT LocalThreadExecutor: public TaskExecutor
     {
       public:
-        static std::unique_ptr<QueuedTaskExecutor> create();
+        static std::unique_ptr<LocalThreadExecutor> create();
 
         /**
          * @param maxCount the maximum number of task to process.
