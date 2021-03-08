@@ -23,18 +23,20 @@ namespace vanilo::core::traits {
 
     namespace internal {
 
+        struct VoidType
+        {
+            using type = void;
+        };
+
         template <typename... Args>
         struct Arguments
         {
             template <std::size_t N>
-            using Element = typename std::tuple_element<N, std::tuple<Args...>>::type;
-        };
-
-        template <>
-        struct Arguments<>
-        {
-            template <std::size_t N>
-            using Element = void;
+            struct Element
+            {
+                using Type =
+                    typename std::conditional<(N < sizeof...(Args)), std::tuple_element<N, std::tuple<Args...>>, VoidType>::type::type;
+            };
         };
 
         template <typename TReturn, typename... Args>
@@ -46,7 +48,7 @@ namespace vanilo::core::traits {
             using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>;
 
             template <std::size_t N>
-            using Arg = typename Arguments<Args...>::template Element<N>;
+            using Arg = typename Arguments<Args...>::template Element<N>::Type;
 
             static constexpr auto Arity    = sizeof...(Args);
             static constexpr bool IsLambda = false;
@@ -62,7 +64,7 @@ namespace vanilo::core::traits {
         using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>; \
                                                                                       \
         template <std::size_t N>                                                      \
-        using Arg = typename Arguments<Args...>::template Element<N>;                 \
+        using Arg = typename Arguments<Args...>::template Element<N>::Type;           \
                                                                                       \
         static constexpr auto Arity    = sizeof...(Args);                             \
         static constexpr bool IsLambda = false;                                       \
