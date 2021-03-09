@@ -9,7 +9,6 @@
 #include <any>
 #include <cassert>
 #include <future>
-#include <iostream>
 
 namespace vanilo::tasker {
 
@@ -45,6 +44,9 @@ namespace vanilo::tasker {
       public:
         template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, void>>
         static auto run(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
+        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, void>>
+        static auto run(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args);
 
         virtual ~Task() = default;
 
@@ -308,8 +310,9 @@ namespace vanilo::tasker {
                 _errorMetadata = std::make_any<std::tuple<Functor, std::tuple<Args...>>>(
                     std::make_tuple(std::forward<Functor>(functor), std::forward_as_tuple(std::forward<Args>(args)...)));
 
-                _errorHandler = [](TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata,
-                                   const std::exception_ptr& exPtr) {
+                _errorHandler = [isSameExecutor = this->_executor == executor](
+                                    TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata,
+                                    const std::exception_ptr& exPtr) {
                     auto exceptionTask = core::binder::bind(
                         [](CancellationToken& token, Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
                             auto [func, args] = std::move(std::any_cast<std::tuple<Functor, std::tuple<Args...>>>(metadata));
@@ -334,19 +337,20 @@ namespace vanilo::tasker {
                                 }
                             }
                             catch (...) {
-                                /// Ignore or log the error coming form the exception handler callback
-                                std::cout << "WTF !!!!!" << std::endl;
-                                TRACE("WTF !!!!!");
+                                /// Log the error coming form the exception handler callback
+                                TRACE("An unexpected exception occurred during execution of onException callback!");
                             }
                         },
                         std::move(token), std::move(task), std::move(metadata), exPtr);
 
                     // If there is an another executor to schedule the task on
-                    auto invocable =
-                        std::make_unique<internal::Invocable<decltype(exceptionTask), void, void>>(executor, std::move(exceptionTask));
-                    invocable->run();
-                    // else
-                    // exceptionTask();
+                    if (isSameExecutor) {
+                        exceptionTask();
+                    }
+                    else {
+                        executor->submit(
+                            std::make_unique<internal::Invocable<decltype(exceptionTask), void, void>>(executor, std::move(exceptionTask)));
+                    }
 
                     return true; // Exception was handled
                 };
@@ -604,11 +608,17 @@ namespace vanilo::tasker {
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
     auto Task::run(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
+        return Task::run(executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+    }
+
+    template <typename TaskFunc, typename... Args, typename TaskBuilder>
+    auto Task::run(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
+    {
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
         constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
 
         auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, IsMember, HasToken>::createInvocable(
-            executor, CancellationToken{}, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+            executor, std::move(token), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
 
         return Task::Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(invocable), last};

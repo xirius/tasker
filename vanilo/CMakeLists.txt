@@ -35,8 +35,8 @@ file(GLOB_RECURSE SOURCES FOLLOW_SYMLINKS CONFIGURE_DEPENDS
     "${SOURCE_DIR}/*.h"
     "${PRIVATE_HEADER_DIR}/*.h"
     "${PRIVATE_HEADER_DIR}/*.hpp"
-    "${PUBLIC_HEADER_DIR}/*h"
-    "${PUBLIC_HEADER_DIR}/*hpp")
+    "${PUBLIC_HEADER_DIR}/*.h"
+    "${PUBLIC_HEADER_DIR}/*.hpp")
 
 if(NOT BUILD_SHARED_LIBS)
     set_target_properties("${TARGET_NAME}" PROPERTIES COMPILE_FLAGS "-D${TARGET_EXPORT_DEFINE}")
@@ -88,7 +88,7 @@ if(BUILD_UNIT_TESTS)
     target_compile_options(${TARGET_UT_NAME} PRIVATE -Werror)
 
     # Set include directories of private and public headers
-    target_include_directories(${TARGET_UT_NAME} PRIVATE ${INCLUDE_DIRS})
+    target_include_directories(${TARGET_UT_NAME} PRIVATE ${INCLUDE_DIRS} ${PRIVATE_HEADER_DIR})
 
     # Set common compile features
     target_compile_features(${TARGET_UT_NAME} PRIVATE "cxx_std_${CMAKE_CXX_STANDARD}")
