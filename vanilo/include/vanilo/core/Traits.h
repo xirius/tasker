@@ -39,22 +39,28 @@ namespace vanilo::core::traits {
             };
         };
 
-        template <typename TReturn, typename... Args>
-        struct FunctionTraitsBase<TReturn (*)(Args...)>
-        {
-            using ReturnType   = TReturn;
-            using ClassType    = void;
-            using ArgsType     = typename std::tuple<Args...>;
-            using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>;
+#define FUNCTION_TRAITS_TEMPLATE(REF)                                                 \
+    template <typename TReturn, typename... Args>                                     \
+    struct FunctionTraitsBase<TReturn (*)(Args...) REF>                               \
+    {                                                                                 \
+        using ReturnType   = TReturn;                                                 \
+        using ClassType    = void;                                                    \
+        using ArgsType     = typename std::tuple<Args...>;                            \
+        using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>; \
+                                                                                      \
+        template <std::size_t N>                                                      \
+        using Arg = typename Arguments<Args...>::template Element<N>::Type;           \
+                                                                                      \
+        static constexpr auto Arity    = sizeof...(Args);                             \
+        static constexpr bool IsLambda = false;                                       \
+    };
 
-            template <std::size_t N>
-            using Arg = typename Arguments<Args...>::template Element<N>::Type;
+        FUNCTION_TRAITS_TEMPLATE()
+        FUNCTION_TRAITS_TEMPLATE(noexcept)
 
-            static constexpr auto Arity    = sizeof...(Args);
-            static constexpr bool IsLambda = false;
-        };
+#undef FUNCTION_TRAITS_TEMPLATE
 
-#define FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)                               \
+#define MEMBER_FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)                        \
     template <typename TReturn, typename TClass, typename... Args>                    \
     struct FunctionTraitsBase<TReturn (TClass::*)(Args...) CV REF>                    \
     {                                                                                 \
@@ -70,11 +76,11 @@ namespace vanilo::core::traits {
         static constexpr bool IsLambda = false;                                       \
     };
 
-#define FUNCTION_TRAITS(REF, L_VAL, R_VAL)              \
-    FUNCTION_TRAITS_TEMPLATE(, REF, LVAL, RVAL)         \
-    FUNCTION_TRAITS_TEMPLATE(const, REF, LVAL, RVAL)    \
-    FUNCTION_TRAITS_TEMPLATE(volatile, REF, LVAL, RVAL) \
-    FUNCTION_TRAITS_TEMPLATE(const volatile, REF, LVAL, RVAL)
+#define FUNCTION_TRAITS(REF, L_VAL, R_VAL)                     \
+    MEMBER_FUNCTION_TRAITS_TEMPLATE(, REF, LVAL, RVAL)         \
+    MEMBER_FUNCTION_TRAITS_TEMPLATE(const, REF, LVAL, RVAL)    \
+    MEMBER_FUNCTION_TRAITS_TEMPLATE(volatile, REF, LVAL, RVAL) \
+    MEMBER_FUNCTION_TRAITS_TEMPLATE(const volatile, REF, LVAL, RVAL)
 
         FUNCTION_TRAITS(, true_type, true_type)
         FUNCTION_TRAITS(&, true_type, false_type)
@@ -84,9 +90,9 @@ namespace vanilo::core::traits {
         FUNCTION_TRAITS(&&noexcept, false_type, true_type)
 
 #undef FUNCTION_TRAITS
-#undef FUNCTION_TRAITS_TEMPLATE
+#undef MEMBER_FUNCTION_TRAITS_TEMPLATE
 
-        /// Lambda functions' traits
+        /// Lambda function traits
         template <typename Signature>
         struct FunctionTraitsBase<Signature, std::void_t<decltype(&Signature::operator())>>
             : public FunctionTraitsBase<decltype(&Signature::operator())>
