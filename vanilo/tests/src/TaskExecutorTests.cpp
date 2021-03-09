@@ -20,7 +20,7 @@ class CustomTask: public Task
     int& _value;
 };
 
-SCENARIO("Test the flow of the QueuedTaskExecutor", "[queued executor]")
+SCENARIO("Test the flow of the QueuedTaskExecutor", "[local executor]")
 {
     GIVEN("An initial executor")
     {
