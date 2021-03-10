@@ -75,7 +75,7 @@ struct Foo
 /// Tests
 /// ================================================================================================
 
-SCENARIO("Test the task runner #1: Task::run void<>", "[task runner]")
+SCENARIO("Task::run #1 void<>", "[task runner]")
 {
     GIVEN("A local executor")
     {
@@ -139,7 +139,7 @@ SCENARIO("Test the task runner #1: Task::run void<>", "[task runner]")
     }
 }
 
-SCENARIO("Test the task runner #2: Task::run void<[CancellationToken]>", "[task runner]")
+SCENARIO("Task::run #2 void<[CancellationToken]>", "[task runner]")
 {
     GIVEN("A local executor")
     {
@@ -213,6 +213,44 @@ SCENARIO("Test the task runner #2: Task::run void<[CancellationToken]>", "[task 
             {
                 REQUIRE(executor->count() == 0);
                 REQUIRE(result == 4);
+            }
+        }
+    }
+}
+
+SCENARIO("Task::run #3 Result<void> -> Result<Arg>", "[task runner]")
+{
+    GIVEN("A local executor")
+    {
+        auto executor = LocalThreadExecutor::create();
+
+        WHEN("Future is taken from 1 level task #1")
+        {
+            auto future = Task::run(executor.get(), []() { return 123; }).getFuture();
+
+            executor->process(1);
+
+            THEN("The count should be 0 and the result 123")
+            {
+                REQUIRE(executor->count() == 0);
+                REQUIRE(future.get() == 123);
+            }
+        }
+
+        WHEN("Future is taken from 2 level task #1")
+        {
+            auto future = Task::run(executor.get(), []() {
+                              return 1.23; // pass to the next task
+                          }).then(executor.get(), [](double arg) {
+                                return arg * 3.21;
+                            }).getFuture();
+
+            executor->process(2);
+
+            THEN("The count should be 0 and the result 123")
+            {
+                REQUIRE(executor->count() == 0);
+                REQUIRE(future.get() == 1.23 * 3.21);
             }
         }
     }

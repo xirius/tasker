@@ -37,8 +37,7 @@ namespace vanilo::tasker {
 
     class VANILO_EXPORT Task
     {
-      protected:
-        template <typename Invocable, typename Signature, typename Arg>
+        template <typename Invocable, typename Signature, typename Arg, bool Primary = true>
         class Builder;
 
       public:
@@ -116,9 +115,10 @@ namespace vanilo::tasker {
             virtual ~BaseTaskBuilder();
 
           protected:
-            BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* last);
+            BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* current, internal::ChainableTask* last);
 
             std::unique_ptr<internal::ChainableTask> _task;
+            internal::ChainableTask* _current;
             internal::ChainableTask* _last;
         };
     } // namespace internal
@@ -126,7 +126,7 @@ namespace vanilo::tasker {
     /// Task::Builder declaration
     /// ============================================================================================
 
-    template <typename Invocable, typename Signature, typename Arg>
+    template <typename Invocable, typename Signature, typename Arg, bool Primary>
     class Task::Builder: public internal::BaseTaskBuilder
     {
         friend Task;
@@ -140,7 +140,9 @@ namespace vanilo::tasker {
         auto then(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
 
         template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, Arg>>
-        void onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+        auto onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
+        auto getFuture() -> std::future<ResultType>;
 
       private:
         using BaseTaskBuilder::BaseTaskBuilder;
@@ -219,7 +221,7 @@ namespace vanilo::tasker {
          */
         class ChainableTask: public Task
         {
-            template <typename Callable, typename Result, typename Arg>
+            template <typename C, typename R, typename A>
             friend class BaseTask;
 
           public:
@@ -404,7 +406,9 @@ namespace vanilo::tasker {
                     return;
                 }
 
-                _errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr);
+                if (!_errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr)) {
+                    TRACE("An unhandled exception occurred!");
+                }
             }
 
             template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
@@ -706,21 +710,6 @@ namespace vanilo::tasker {
             }
         };
 
-        /// Base task builder implementation
-        /// ========================================================================================
-
-        inline BaseTaskBuilder::BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* last)
-            : _task{std::move(task)}, _last{last}
-        {
-        }
-
-        inline BaseTaskBuilder::~BaseTaskBuilder()
-        {
-            if (_task) { // Schedule task on the executor
-                _task->getExecutor()->submit(std::move(_task));
-            }
-        }
-
         /// BuilderHelper implementation
         /// ========================================================================================
 
@@ -766,14 +755,30 @@ namespace vanilo::tasker {
             }
         };
 
+        /// BaseTaskBuilder implementation
+        /// ========================================================================================
+
+        inline BaseTaskBuilder::BaseTaskBuilder(
+            std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* current, internal::ChainableTask* last)
+            : _task{std::move(task)}, _current{current}, _last{last}
+        {
+        }
+
+        inline BaseTaskBuilder::~BaseTaskBuilder()
+        {
+            if (_task) { // Schedule task on the executor
+                _task->getExecutor()->submit(std::move(_task));
+            }
+        }
+
     } // namespace internal
 
     /// Task::Builder implementation
     /// ============================================================================================
 
-    template <typename Invocable, typename Signature, typename Arg>
+    template <typename Invocable, typename Signature, typename Arg, bool Primary>
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
-    auto Task::Builder<Invocable, Signature, Arg>::then(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    auto Task::Builder<Invocable, Signature, Arg, Primary>::then(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
         internal::ArityChecker<typename std::decay<ResultType>::type, typename TaskBuilder::PureArgs>::validate();
         constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
@@ -784,15 +789,34 @@ namespace vanilo::tasker {
         auto last = invocable.get();
 
         _last->setNext(std::move(invocable));
-        return Task::Builder<typename decltype(invocable)::element_type, Signature, Arg>{std::move(_task), last};
+        return Task::Builder<typename decltype(invocable)::element_type, Signature, Arg>{std::move(_task), _last, last};
     }
 
-    template <typename Invocable, typename Signature, typename Arg>
+    template <typename Invocable, typename Signature, typename Arg, bool Primary>
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
-    void Task::Builder<Invocable, Signature, Arg>::onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    auto Task::Builder<Invocable, Signature, Arg, Primary>::onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
         auto task = static_cast<Invocable*>(_task->getLastTask());
         task->setupExceptionCallback(executor, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        return Task::Builder<Invocable, Signature, Arg, false>{std::move(_task), _current, _last};
+    }
+
+    template <typename Invocable, typename Signature, typename Arg, bool Primary>
+    auto Task::Builder<Invocable, Signature, Arg, Primary>::getFuture() -> std::future<ResultType>
+    {
+        auto task     = static_cast<Invocable*>(_task->getLastTask());
+        auto promised = task->toPromisedTask();
+        auto future   = promised->getFuture();
+
+        if (_current == _last) {
+            _task    = std::move(promised);
+            _current = _last = _task.get();
+        }
+        else {
+            _current->setNext(std::move(promised));
+        }
+
+        return future;
     }
 
     /// Task implementation
@@ -814,7 +838,7 @@ namespace vanilo::tasker {
             executor, std::move(token), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
 
-        return Task::Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(invocable), last};
+        return Task::Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(invocable), last, last};
     }
 
 } // namespace vanilo::tasker
