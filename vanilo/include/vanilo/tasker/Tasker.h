@@ -594,7 +594,7 @@ namespace vanilo::tasker {
             }
 
             explicit Invocable(BaseInvocable<Callable, Result, Arg, false>&& other) noexcept
-                : BaseInvocable<Callable, Result, Arg, false>{std::forward<BaseInvocable<Callable, Result, Arg, false>>(other)}
+                : BaseInvocable<Callable, Result, Arg, true>{std::forward<BaseInvocable<Callable, Result, Arg, false>>(other)}
             {
             }
 
@@ -626,7 +626,7 @@ namespace vanilo::tasker {
             }
 
             explicit Invocable(BaseInvocable<Callable, Result, void, false>&& other) noexcept
-                : BaseInvocable<Callable, Result, void, false>{std::forward<BaseInvocable<Callable, Result, void, false>>(other)}
+                : BaseInvocable<Callable, Result, void, true>{std::forward<BaseInvocable<Callable, Result, void, false>>(other)}
             {
             }
 
@@ -658,7 +658,7 @@ namespace vanilo::tasker {
             }
 
             explicit Invocable(BaseInvocable<Callable, void, Arg, false>&& other) noexcept
-                : BaseInvocable<Callable, void, Arg, false>{std::forward<BaseInvocable<Callable, void, Arg, false>>(other)}
+                : BaseInvocable<Callable, void, Arg, true>{std::forward<BaseInvocable<Callable, void, Arg, false>>(other)}
             {
             }
 

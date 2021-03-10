@@ -93,7 +93,11 @@ TEST_CASE("Run task: void<void> chained and take std::future<void> with exceptio
 
 TEST_CASE("Run task: void<void> convert to PromisedTask", "[task]")
 {
-    auto task       = []() { throw std::runtime_error{"Something happened"}; };
+    auto value = 0;
+    auto task  = [&value]() {
+        value = 1;
+        throw std::runtime_error{"Something happened"};
+    };
     auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, void, false>>(nullptr, std::move(task));
     auto invokable2 = invokable1->toPromisedTask();
     auto future     = invokable2->getFuture();
@@ -101,4 +105,52 @@ TEST_CASE("Run task: void<void> convert to PromisedTask", "[task]")
     invokable2->run();
 
     CHECK_THROWS_AS(future.get(), std::runtime_error);
+    REQUIRE(value == 1);
+}
+
+TEST_CASE("Run task: void<Arg> convert to PromisedTask", "[task]")
+{
+    auto value = 0;
+    auto task  = [&value](int val) {
+        value = val;
+        throw std::runtime_error{"Something happened"};
+    };
+    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, int, false>>(nullptr, std::move(task));
+
+    invokable1->setArgument(123);
+
+    auto invokable2 = invokable1->toPromisedTask();
+    auto future     = invokable2->getFuture();
+
+    invokable2->run();
+
+    CHECK_THROWS_AS(future.get(), std::runtime_error);
+    REQUIRE(value == 123);
+}
+
+TEST_CASE("Run task: Result<void> convert to PromisedTask", "[task]")
+{
+    auto task       = []() { return 123; };
+    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), int, void, false>>(nullptr, std::move(task));
+    auto invokable2 = invokable1->toPromisedTask();
+    auto future     = invokable2->getFuture();
+
+    invokable2->run();
+
+    REQUIRE(future.get() == 123);
+}
+
+TEST_CASE("Run task: Result<Arg> convert to PromisedTask", "[task]")
+{
+    auto task       = [](double arg) { return arg * 3.21; };
+    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), double, double, false>>(nullptr, std::move(task));
+
+    invokable1->setArgument(1.23);
+
+    auto invokable2 = invokable1->toPromisedTask();
+    auto future     = invokable2->getFuture();
+
+    invokable2->run();
+
+    REQUIRE(future.get() == 1.23 * 3.21);
 }
