@@ -90,3 +90,15 @@ TEST_CASE("Run task: void<void> chained and take std::future<void> with exceptio
 
     CHECK_THROWS_AS(future.get(), std::runtime_error);
 }
+
+TEST_CASE("Run task: void<void> convert to PromisedTask", "[task]")
+{
+    auto task       = []() { throw std::runtime_error{"Something happened"}; };
+    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, void, false>>(nullptr, std::move(task));
+    auto invokable2 = invokable1->toPromisedTask();
+    auto future     = invokable2->getFuture();
+
+    invokable2->run();
+
+    CHECK_THROWS_AS(future.get(), std::runtime_error);
+}

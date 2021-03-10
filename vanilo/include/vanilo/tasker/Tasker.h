@@ -227,6 +227,11 @@ namespace vanilo::tasker {
             {
             }
 
+            ChainableTask(ChainableTask&& other) noexcept
+                : _executor{other._executor}, _token{std::move(other._token)}, _next{std::move(other._next)}
+            {
+            }
+
             [[nodiscard]] inline TaskExecutor* getExecutor() const
             {
                 return _executor;
@@ -281,7 +286,14 @@ namespace vanilo::tasker {
         class ParameterizedChainableTask: public ChainableTask
         {
           public:
-            using ChainableTask::ChainableTask;
+            explicit ParameterizedChainableTask(TaskExecutor* executor): ChainableTask{executor}
+            {
+            }
+
+            ParameterizedChainableTask(ParameterizedChainableTask&& other) noexcept
+                : ChainableTask{std::move(other)}, _param{std::move(other._param)}
+            {
+            }
 
             void setArgument(Arg&& arg)
             {
@@ -305,6 +317,9 @@ namespace vanilo::tasker {
         template <typename Callable, typename Result, typename Arg>
         class BaseTask: public ParameterizedChainableTask<Arg>
         {
+            template <typename C, typename R, typename A>
+            friend class PromisedTask;
+
             using ErrorHandler = bool (*)(TaskExecutor* executor, CancellationToken&, Callable&, std::any&, const std::exception_ptr&);
 
           public:
@@ -367,6 +382,11 @@ namespace vanilo::tasker {
 
                     return true; // Exception was handled
                 };
+            }
+
+            [[nodiscard]] auto toPromisedTask() noexcept
+            {
+                return std::make_unique<Invocable<Callable, Result, Arg, true>>(std::move(*this));
             }
 
           protected:
@@ -453,6 +473,11 @@ namespace vanilo::tasker {
             }
 
           protected:
+            explicit PromisedTask(BaseTask<Callable, Result, Arg>&& other) noexcept
+                : ParameterizedChainableTask<Arg>{std::forward<BaseTask<Callable, Result, Arg>>(other)}, _task{std::move(other._task)}
+            {
+            }
+
             [[nodiscard]] bool isPromised() const noexcept override
             {
                 return true;
@@ -491,7 +516,7 @@ namespace vanilo::tasker {
             }
 
             Callable _task;
-            std::promise<Result> _promise;
+            std::promise<Result> _promise{};
         };
 
         template <typename Callable, typename Arg>
@@ -514,6 +539,11 @@ namespace vanilo::tasker {
             }
 
           protected:
+            explicit PromisedTask(BaseTask<Callable, void, Arg>&& other) noexcept
+                : ParameterizedChainableTask<Arg>{std::forward<BaseTask<Callable, void, Arg>>(other)}, _task{std::move(other._task)}
+            {
+            }
+
             void handleException(std::exception_ptr exPtr) override
             {
                 // PromisedTask is supposed to be the last one in the chain
@@ -563,6 +593,11 @@ namespace vanilo::tasker {
             {
             }
 
+            explicit Invocable(BaseInvocable<Callable, Result, Arg, false>&& other) noexcept
+                : BaseInvocable<Callable, Result, Arg, false>{std::forward<BaseInvocable<Callable, Result, Arg, false>>(other)}
+            {
+            }
+
             void run() override
             {
                 try {
@@ -587,6 +622,11 @@ namespace vanilo::tasker {
           public:
             explicit Invocable(TaskExecutor* executor, Callable&& task)
                 : BaseInvocable<Callable, Result, void, Promised>(executor, std::move(task))
+            {
+            }
+
+            explicit Invocable(BaseInvocable<Callable, Result, void, false>&& other) noexcept
+                : BaseInvocable<Callable, Result, void, false>{std::forward<BaseInvocable<Callable, Result, void, false>>(other)}
             {
             }
 
@@ -617,6 +657,11 @@ namespace vanilo::tasker {
             {
             }
 
+            explicit Invocable(BaseInvocable<Callable, void, Arg, false>&& other) noexcept
+                : BaseInvocable<Callable, void, Arg, false>{std::forward<BaseInvocable<Callable, void, Arg, false>>(other)}
+            {
+            }
+
             void run() override
             {
                 try {
@@ -638,6 +683,11 @@ namespace vanilo::tasker {
           public:
             explicit Invocable(TaskExecutor* executor, Callable&& task)
                 : BaseInvocable<Callable, void, void, Promised>(executor, std::move(task))
+            {
+            }
+
+            explicit Invocable(BaseInvocable<Callable, void, void, false>&& other) noexcept
+                : BaseInvocable<Callable, void, void, true>{std::forward<BaseInvocable<Callable, void, void, false>>(other)}
             {
             }
 
