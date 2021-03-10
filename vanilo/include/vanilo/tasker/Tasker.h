@@ -202,16 +202,26 @@ namespace vanilo::tasker {
          * Generic task specialization.
          * @tparam Callable The type of the task
          * @tparam Result The result type returned by the task
-         * @tparam Arg The type of the argument  which is taken by the task
+         * @tparam Arg The type of the argument which is taken by the task
+         * @tparam Promised Boolean flag to choose between normal and promised task
          */
-        template <typename Callable, typename Result, typename Arg>
+        template <typename Callable, typename Result, typename Arg, bool Promised = false>
         class Invocable;
+
+        template <typename Callable, typename Result, typename Arg>
+        class BaseTask;
+
+        template <typename Callable, typename Result, typename Arg>
+        class PromisedTask;
 
         /**
          * Represents an abstract generic chainable task.
          */
         class ChainableTask: public Task
         {
+            template <typename Callable, typename Result, typename Arg>
+            friend class BaseTask;
+
           public:
             explicit ChainableTask(TaskExecutor* executor): _executor{executor}
             {
@@ -238,7 +248,7 @@ namespace vanilo::tasker {
                 _next = std::move(task);
             }
 
-            ChainableTask* getLastTask()
+            [[nodiscard]] ChainableTask* getLastTask()
             {
                 auto task = this;
 
@@ -250,6 +260,9 @@ namespace vanilo::tasker {
             }
 
           protected:
+            [[nodiscard]] virtual bool isPromised() const noexcept = 0;
+            virtual void handleException(std::exception_ptr exPtr) = 0;
+
             inline void scheduleNext()
             {
                 _next->_token = std::move(_token);
@@ -343,7 +356,7 @@ namespace vanilo::tasker {
                         },
                         std::move(token), std::move(task), std::move(metadata), exPtr);
 
-                    // If there is an another executor to schedule the task on
+                    // If another executor is provided where the exception has to be handled
                     if (isSameExecutor) {
                         exceptionTask();
                     }
@@ -357,8 +370,20 @@ namespace vanilo::tasker {
             }
 
           protected:
-            void handleException(const std::exception_ptr& exPtr)
+            [[nodiscard]] bool isPromised() const noexcept override
             {
+                return false;
+            }
+
+            void handleException(std::exception_ptr exPtr) override
+            {
+                auto lastTask = this->getLastTask();
+
+                if (lastTask->isPromised()) {
+                    lastTask->handleException(std::move(exPtr));
+                    return;
+                }
+
                 _errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr);
             }
 
@@ -413,65 +438,182 @@ namespace vanilo::tasker {
             ErrorHandler _errorHandler;
         };
 
-        // class PromisedInvocable
-
         template <typename Callable, typename Result, typename Arg>
-        class Invocable: public BaseTask<Callable, Result, Arg>
+        class PromisedTask: public ParameterizedChainableTask<Arg>
         {
           public:
-            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, Result, Arg>(executor, std::move(task))
+            explicit PromisedTask(TaskExecutor* executor, Callable&& task)
+                : ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}
             {
             }
 
-            void run() override
+            [[nodiscard]] std::future<Result> getFuture()
             {
-                try {
-                    if (this->_next) {
-                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
-                        next->setArgument(this->executeTask());
-                        this->scheduleNext();
-                    }
-                    else {
-                        this->executeTask();
-                    }
-                }
-                catch (...) {
-                    this->handleException(std::current_exception());
-                }
-            }
-        };
-
-        template <typename Callable, typename Result>
-        class Invocable<Callable, Result, void>: public BaseTask<Callable, Result, void>
-        {
-          public:
-            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, Result, void>(executor, std::move(task))
-            {
+                return _promise.get_future();
             }
 
-            void run() override
+          protected:
+            [[nodiscard]] bool isPromised() const noexcept override
             {
-                try {
-                    if (this->_next) {
-                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
-                        next->setArgument(this->executeTask());
-                        this->scheduleNext();
-                    }
-                    else {
-                        this->executeTask();
-                    }
-                }
-                catch (...) {
-                    this->handleException(std::current_exception());
-                }
+                return true;
             }
+
+            void handleException(std::exception_ptr exPtr) override
+            {
+                _promise.set_exception(std::move(exPtr));
+            }
+
+            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
+            inline Result executeTask()
+            {
+                _promise.set_value(_task());
+                return Result{}; // Since PromisedTask is the last one this value will never be used
+            }
+
+            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
+            inline Result executeTask()
+            {
+                _promise.set_value(invoke(this->_param));
+                return Result{}; // Since PromisedTask is the last one this value will never be used
+            }
+
+          private:
+            template <typename Param, typename = std::enable_if_t<!core::IsTuple<Param>::value>>
+            inline Result invoke(Param& param)
+            {
+                return _task(param);
+            }
+
+            template <typename... Args, typename Packed = std::tuple<Args...>, typename = std::enable_if_t<core::IsTuple<Packed>::value>>
+            inline Result invoke(std::tuple<Args...>& args)
+            {
+                return core::InvokeHelper<Result>::invoke(_task, args, std::make_index_sequence<sizeof...(Args)>{});
+            }
+
+            Callable _task;
+            std::promise<Result> _promise;
         };
 
         template <typename Callable, typename Arg>
-        class Invocable<Callable, void, Arg>: public BaseTask<Callable, void, Arg>
+        class PromisedTask<Callable, void, Arg>: public ParameterizedChainableTask<Arg>
         {
           public:
-            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, void, Arg>(executor, std::move(task))
+            explicit PromisedTask(TaskExecutor* executor, Callable&& task)
+                : ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}
+            {
+            }
+
+            [[nodiscard]] std::future<void> getFuture()
+            {
+                return _promise.get_future();
+            }
+
+            [[nodiscard]] bool isPromised() const noexcept override
+            {
+                return true;
+            }
+
+          protected:
+            void handleException(std::exception_ptr exPtr) override
+            {
+                // PromisedTask is supposed to be the last one in the chain
+                _promise.set_exception(std::move(exPtr));
+            }
+
+            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
+            inline void executeTask()
+            {
+                _task();
+                _promise.set_value();
+            }
+
+            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
+            inline void executeTask()
+            {
+                invoke(this->_param);
+                _promise.set_value();
+            }
+
+          private:
+            template <typename Param, typename = std::enable_if_t<!core::IsTuple<Param>::value>>
+            inline void invoke(Param& param)
+            {
+                _task(param);
+            }
+
+            template <typename... Args, typename Packed = std::tuple<Args...>, typename = std::enable_if_t<core::IsTuple<Packed>::value>>
+            inline void invoke(std::tuple<Args...>& args)
+            {
+                core::InvokeHelper<void>::invoke(_task, args, std::make_index_sequence<sizeof...(Args)>{});
+            }
+
+            Callable _task;
+            std::promise<void> _promise{};
+        };
+
+        template <typename Callable, typename Result, typename Arg, bool Promised>
+        using BaseInvocable = std::conditional_t<Promised, PromisedTask<Callable, Result, Arg>, BaseTask<Callable, Result, Arg>>;
+
+        template <typename Callable, typename Result, typename Arg, bool Promised>
+        class Invocable: public BaseInvocable<Callable, Result, Arg, Promised>
+        {
+          public:
+            explicit Invocable(TaskExecutor* executor, Callable&& task)
+                : BaseInvocable<Callable, Result, Arg, Promised>(executor, std::move(task))
+            {
+            }
+
+            void run() override
+            {
+                try {
+                    if (this->_next) {
+                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                        next->setArgument(this->executeTask());
+                        this->scheduleNext();
+                    }
+                    else {
+                        this->executeTask();
+                    }
+                }
+                catch (...) {
+                    this->handleException(std::current_exception());
+                }
+            }
+        };
+
+        template <typename Callable, typename Result, bool Promised>
+        class Invocable<Callable, Result, void, Promised>: public BaseInvocable<Callable, Result, void, Promised>
+        {
+          public:
+            explicit Invocable(TaskExecutor* executor, Callable&& task)
+                : BaseInvocable<Callable, Result, void, Promised>(executor, std::move(task))
+            {
+            }
+
+            void run() override
+            {
+                try {
+                    if (this->_next) {
+                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                        next->setArgument(this->executeTask());
+                        this->scheduleNext();
+                    }
+                    else {
+                        this->executeTask();
+                    }
+                }
+                catch (...) {
+                    this->handleException(std::current_exception());
+                }
+            }
+        };
+
+        template <typename Callable, typename Arg, bool Promised>
+        class Invocable<Callable, void, Arg, Promised>: public BaseInvocable<Callable, void, Arg, Promised>
+        {
+          public:
+            explicit Invocable(TaskExecutor* executor, Callable&& task)
+                : BaseInvocable<Callable, void, Arg, Promised>(executor, std::move(task))
             {
             }
 
@@ -490,11 +632,12 @@ namespace vanilo::tasker {
             }
         };
 
-        template <typename Callable>
-        class Invocable<Callable, void, void>: public BaseTask<Callable, void, void>
+        template <typename Callable, bool Promised>
+        class Invocable<Callable, void, void, Promised>: public BaseInvocable<Callable, void, void, Promised>
         {
           public:
-            explicit Invocable(TaskExecutor* executor, Callable&& task): BaseTask<Callable, void, void>(executor, std::move(task))
+            explicit Invocable(TaskExecutor* executor, Callable&& task)
+                : BaseInvocable<Callable, void, void, Promised>(executor, std::move(task))
             {
             }
 
