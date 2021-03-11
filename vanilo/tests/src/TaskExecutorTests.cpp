@@ -11,6 +11,10 @@ class CustomTask: public Task
     {
     }
 
+    void cancel() noexcept override
+    {
+    }
+
     void run() override
     {
         _value = 1;

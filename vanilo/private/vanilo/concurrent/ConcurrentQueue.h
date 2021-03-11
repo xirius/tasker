@@ -143,12 +143,21 @@ namespace vanilo::concurrent {
          * Invalidates the queue. Used to ensure no conditions are being waited on in the waitDequeue method when
          * a thread or the application is trying to exit. It is an undefined behaviour to continue use the queue
          * after this method has been called.
+         * @return The list of remaining elements in the queue.
          */
-        void invalidate()
+        std::vector<T> invalidate()
         {
             std::lock_guard<std::mutex> lock{_mutex};
+            std::vector<T> remaining;
+
+            while (!_queue.empty()) {
+                remaining.push_back(std::move(_queue.front()));
+                _queue.pop();
+            }
+
             _valid = false;
             _condition.notify_all();
+            return remaining;
         }
 
         /**

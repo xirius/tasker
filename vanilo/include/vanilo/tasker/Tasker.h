@@ -23,7 +23,7 @@ namespace vanilo::tasker {
       public:
         [[nodiscard]] const char* what() const noexcept override
         {
-            return "A task was canceled.";
+            return "The operation was canceled.";
         }
     };
 
@@ -49,7 +49,8 @@ namespace vanilo::tasker {
 
         virtual ~Task() = default;
 
-        virtual void run() = 0;
+        virtual void cancel() noexcept = 0;
+        virtual void run()             = 0;
     };
 
     /// TaskExecutor interface
@@ -85,13 +86,7 @@ namespace vanilo::tasker {
     class VANILO_EXPORT ThreadPoolExecutor: public TaskExecutor
     {
       public:
-        static std::unique_ptr<ThreadPoolExecutor> create();
-
-        /**
-         * @param maxCount the maximum number of task to process.
-         * @return the number of tasks that still need to be processed.
-         */
-        virtual size_t process(size_t maxCount) = 0;
+        static std::unique_ptr<ThreadPoolExecutor> create(size_t numThreads);
     };
 
     namespace internal {
@@ -232,6 +227,11 @@ namespace vanilo::tasker {
             ChainableTask(ChainableTask&& other) noexcept
                 : _executor{other._executor}, _token{std::move(other._token)}, _next{std::move(other._next)}
             {
+            }
+
+            void cancel() noexcept override
+            {
+                _token.cancel();
             }
 
             [[nodiscard]] inline TaskExecutor* getExecutor() const
@@ -626,6 +626,10 @@ namespace vanilo::tasker {
                         this->executeTask();
                     }
                 }
+                catch (CancellationException& ex) {
+                    this->_token.cancel();
+                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
+                }
                 catch (...) {
                     this->handleException(std::current_exception());
                 }
@@ -658,6 +662,10 @@ namespace vanilo::tasker {
                         this->executeTask();
                     }
                 }
+                catch (CancellationException& ex) {
+                    this->_token.cancel();
+                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
+                }
                 catch (...) {
                     this->handleException(std::current_exception());
                 }
@@ -687,6 +695,10 @@ namespace vanilo::tasker {
                         this->scheduleNext();
                     }
                 }
+                catch (CancellationException& ex) {
+                    this->_token.cancel();
+                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
+                }
                 catch (...) {
                     this->handleException(std::current_exception());
                 }
@@ -715,6 +727,10 @@ namespace vanilo::tasker {
                     if (this->_next) {
                         this->scheduleNext();
                     }
+                }
+                catch (CancellationException& ex) {
+                    this->_token.cancel();
+                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
                 }
                 catch (...) {
                     this->handleException(std::current_exception());
