@@ -28,7 +28,10 @@ class DefaultLocalThreadExecutor: public LocalThreadExecutor
                 task->run();
             }
             catch (const std::exception& ex) {
-                std::cerr << "An exception occurred during task execution. Message: " << ex.what() << std::endl;
+                TRACE("An unhandled exception occurred during task execution. Message: %s", ex.what());
+            }
+            catch (...) {
+                TRACE("An unhandled exception occurred during task execution!");
             }
 
             if (++counter >= maxCount)

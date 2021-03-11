@@ -322,12 +322,12 @@ namespace vanilo::tasker {
             template <typename C, typename R, typename A>
             friend class PromisedTask;
 
-            using ErrorHandler = bool (*)(TaskExecutor* executor, CancellationToken&, Callable&, std::any&, const std::exception_ptr&);
+            using ErrorHandler = bool (*)(TaskExecutor* executor, CancellationToken&, Callable&, std::any&, std::exception_ptr&);
 
           public:
             explicit BaseTask(TaskExecutor* executor, Callable&& task)
                 : ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}, _errorExecutor{nullptr},
-                  _errorHandler{[](TaskExecutor* executor, CancellationToken&, Callable&, std::any&, const std::exception_ptr&) {
+                  _errorHandler{[](TaskExecutor* executor, CancellationToken&, Callable&, std::any&, std::exception_ptr&) {
                       return false; // Exception was not handled
                   }}
             {
@@ -342,7 +342,7 @@ namespace vanilo::tasker {
 
                 _errorHandler = [isSameExecutor = this->_executor == executor](
                                     TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata,
-                                    const std::exception_ptr& exPtr) {
+                                    std::exception_ptr& exPtr) {
                     auto exceptionTask = core::binder::bind(
                         [](CancellationToken& token, Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
                             auto [func, args] = std::move(std::any_cast<std::tuple<Functor, std::tuple<Args...>>>(metadata));
@@ -407,7 +407,7 @@ namespace vanilo::tasker {
                 }
 
                 if (!_errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr)) {
-                    TRACE("An unhandled exception occurred!");
+                    traceException(exPtr);
                 }
             }
 
@@ -455,7 +455,19 @@ namespace vanilo::tasker {
                     std::forward<Functor>(func), std::move(std::get<Indexes1>(args1))..., std::move(std::get<Indexes2>(args2))...)();
             }
 
-          private:
+            inline static void traceException(std::exception_ptr& exPtr)
+            {
+                try {
+                    std::rethrow_exception(exPtr);
+                }
+                catch (std::exception& ex) {
+                    TRACE("An unhandled exception occurred during task execution. Message: %s", ex.what());
+                }
+                catch (...) {
+                    TRACE("An unhandled exception occurred during task execution!");
+                }
+            }
+
             Callable _task;
             TaskExecutor* _errorExecutor{};
             std::any _errorMetadata{};
