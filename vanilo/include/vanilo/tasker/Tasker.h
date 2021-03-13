@@ -59,9 +59,18 @@ namespace vanilo::tasker {
     class TaskExecutor
     {
       public:
+        /**
+         * The number of concurrent threads supported by the implementation.
+         */
+        static size_t DefaultThreadNumber;
+
         virtual ~TaskExecutor() = default;
 
-        [[nodiscard]] virtual size_t count() const      = 0;
+        /**
+         * @return The current number of tasks in the queue.
+         */
+        [[nodiscard]] virtual size_t count() const = 0;
+
         virtual void submit(std::unique_ptr<Task> task) = 0;
     };
 
@@ -75,7 +84,7 @@ namespace vanilo::tasker {
 
         /**
          * @param maxCount the maximum number of task to process.
-         * @return the number of tasks that still need to be processed.
+         * @return The number of the unprocessed tasks in the queue.
          */
         virtual size_t process(size_t maxCount) = 0;
     };
@@ -86,7 +95,24 @@ namespace vanilo::tasker {
     class VANILO_EXPORT ThreadPoolExecutor: public TaskExecutor
     {
       public:
+        /**
+         * Creates a new thread pool executor with the default number of threads.
+         * @return The new instance of the default ThreadPoolExecutor.
+         */
+        static std::unique_ptr<ThreadPoolExecutor> create();
+
+        /**
+         * Creates a new thread pool executor with the desired number of threads.
+         * @param numThreads The desired number of threads in the thread pool.
+         * @return The new instance of the default ThreadPoolExecutor with the desired number of threads.
+         */
         static std::unique_ptr<ThreadPoolExecutor> create(size_t numThreads);
+
+        /**
+         * Resizes the number of the threads in the thread pool.
+         * @param numThreads The desired number of threads in the thread pool.
+         */
+        virtual void resize(size_t numThreads) = 0;
     };
 
     namespace internal {
@@ -407,7 +433,8 @@ namespace vanilo::tasker {
                 }
 
                 if (!_errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr)) {
-                    traceException(exPtr);
+                    // Exception was not handled by the task so it is rethrown
+                    std::rethrow_exception(exPtr);
                 }
             }
 
@@ -453,19 +480,6 @@ namespace vanilo::tasker {
 
                 task.template rebindSelectedPrepend<HasBoundedToken, SelectedArgNum>(
                     std::forward<Functor>(func), std::move(std::get<Indexes1>(args1))..., std::move(std::get<Indexes2>(args2))...)();
-            }
-
-            inline static void traceException(std::exception_ptr& exPtr)
-            {
-                try {
-                    std::rethrow_exception(exPtr);
-                }
-                catch (std::exception& ex) {
-                    TRACE("An unhandled exception occurred during task execution. Message: %s", ex.what());
-                }
-                catch (...) {
-                    TRACE("An unhandled exception occurred during task execution!");
-                }
             }
 
             Callable _task;
