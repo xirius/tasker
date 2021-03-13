@@ -4,7 +4,7 @@ using namespace vanilo::concurrent;
 using namespace vanilo::tasker;
 
 /// ThreadPool system tasks
-/// ============================================================================================
+/// ================================================================================================
 
 class StopThreadException final: public std::exception
 {
@@ -43,7 +43,7 @@ class StopThreadTask: public Task
 };
 
 /// DefaultThreadPoolExecutor implementation
-/// ============================================================================================
+/// ================================================================================================
 
 DefaultThreadPoolExecutor::DefaultThreadPoolExecutor(size_t numThreads)
 {
