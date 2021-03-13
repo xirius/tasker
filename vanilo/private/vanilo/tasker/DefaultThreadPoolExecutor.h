@@ -16,8 +16,9 @@ namespace vanilo::tasker {
         ~DefaultThreadPoolExecutor() override;
 
         [[nodiscard]] size_t count() const override;
-        void resize(size_t numThreads) override;
+        std::future<void> resize(size_t numThreads) override;
         void submit(std::unique_ptr<Task> task) override;
+        [[nodiscard]] size_t threadCount() const noexcept override;
 
       private:
         void init(size_t numThreads);

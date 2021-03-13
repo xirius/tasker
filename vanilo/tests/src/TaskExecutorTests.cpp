@@ -24,7 +24,7 @@ class CustomTask: public Task
     int& _value;
 };
 
-SCENARIO("Test the flow of the QueuedTaskExecutor", "[local executor]")
+SCENARIO("Test the flow of the LocalThreadExecutor", "[local executor]")
 {
     GIVEN("An initial executor")
     {
@@ -69,6 +69,40 @@ SCENARIO("Test the flow of the QueuedTaskExecutor", "[local executor]")
                 REQUIRE(value1 == 1);
                 REQUIRE(value2 == 1);
                 REQUIRE(value3 == 0);
+            }
+        }
+    }
+}
+
+SCENARIO("Test ThreadPoolExecutor", "[pool executor]")
+{
+    GIVEN("An initial executor with 0 threads")
+    {
+        auto executor = ThreadPoolExecutor::create(0);
+
+        WHEN("Resized to 1")
+        {
+            executor->resize(1);
+
+            THEN("The thread count should return 1")
+            {
+                REQUIRE(executor->threadCount() == 1);
+            }
+        }
+    }
+
+    GIVEN("An initial executor with 1 thread")
+    {
+        auto executor = ThreadPoolExecutor::create(1);
+
+        WHEN("Resized to 0")
+        {
+            auto future = executor->resize(0);
+
+            THEN("The thread count should return 0")
+            {
+                future.get();
+                REQUIRE(executor->threadCount() == 0);
             }
         }
     }

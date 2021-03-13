@@ -71,6 +71,10 @@ namespace vanilo::tasker {
          */
         [[nodiscard]] virtual size_t count() const = 0;
 
+        /**
+         * Submits the task for the execution on the task executor.
+         * @param task The task to be executed on the task executor.
+         */
         virtual void submit(std::unique_ptr<Task> task) = 0;
     };
 
@@ -111,8 +115,15 @@ namespace vanilo::tasker {
         /**
          * Resizes the number of the threads in the thread pool.
          * @param numThreads The desired number of threads in the thread pool.
+         * @return The future that is set when the resizing operation is finished.
          */
-        virtual void resize(size_t numThreads) = 0;
+        virtual std::future<void> resize(size_t numThreads) = 0;
+
+        /**
+         * Returns the number of threads in the executor thread pool.
+         * @return The number of threads in the thread pool.
+         */
+        [[nodiscard]] virtual size_t threadCount() const noexcept = 0;
     };
 
     namespace internal {
