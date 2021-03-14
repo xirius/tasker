@@ -174,7 +174,6 @@ namespace vanilo::tasker {
 
         internal::ChainableTask* _current;
         internal::ChainableTask* _last;
-        // using BaseTaskBuilder::BaseTaskBuilder;
     };
 
     template <typename Invocable, typename Signature, typename Arg>
@@ -182,13 +181,22 @@ namespace vanilo::tasker {
     {
         friend Task;
 
+        template <typename T>
+        using IsExecutor = std::is_base_of<TaskExecutor, std::remove_pointer_t<std::decay_t<T>>>;
+
+        template <typename Functor>
+        using TaskBuilder = Builder<Invocable, Functor, Arg, false>;
+
       public:
         using Return = typename Builder<Invocable, Signature, Arg, false>::ResultType;
 
         auto getFuture() -> std::future<Return>;
 
-        template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<Invocable, TaskFunc, Arg, false>>
+        template <typename TaskFunc, typename... Args>
         auto onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
+        template <typename TaskFunc, typename... Args, typename = typename std::enable_if_t<!IsExecutor<TaskFunc>::value>>
+        auto onException(TaskFunc&& func, Args&&... args);
 
       private:
         using Task::Builder<Invocable, Signature, Arg, false>::Builder;
@@ -402,8 +410,7 @@ namespace vanilo::tasker {
                                     std::rethrow_exception(exPtr);
                                 }
                                 catch (std::exception& ex) {
-                                    using TokenArg =
-                                        typename std::decay<typename core::traits::FunctionTraits<Functor>::template Arg<1>>::type;
+                                    using TokenArg = typename std::decay_t<typename core::traits::FunctionTraits<Functor>::template Arg<1>>;
                                     constexpr bool HasToken = std::is_same_v<TokenArg, CancellationToken>;
 
                                     // Pack exception and optional cancellation token
@@ -504,7 +511,7 @@ namespace vanilo::tasker {
                 Args2& args2,
                 std::index_sequence<Indexes2...>)
             {
-                using BoundedTokenArg = typename std::decay<typename std::decay<decltype(task)>::type::template Element<0>>::type;
+                using BoundedTokenArg = typename std::decay_t<typename std::decay_t<decltype(task)>::template Element<0>>;
                 using ProvidedArgs    = typename core::traits::FunctionTraits<Functor>::PureArgsType;
 
                 constexpr bool HasBoundedToken = std::is_same_v<BoundedTokenArg, CancellationToken>;
@@ -867,8 +874,8 @@ namespace vanilo::tasker {
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
     auto Task::Builder<Invocable, Signature, Arg, false>::then(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
-        internal::ArityChecker<typename std::decay<ResultType>::type, typename TaskBuilder::PureArgs>::validate();
-        constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
+        internal::ArityChecker<typename std::decay_t<ResultType>, typename TaskBuilder::PureArgs>::validate();
+        constexpr bool HasToken = std::is_same_v<typename std::decay_t<typename TaskBuilder::FirstArg>, CancellationToken>;
         constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
 
         auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, ResultType, IsMember, HasToken>::createInvocable(
@@ -898,12 +905,21 @@ namespace vanilo::tasker {
     }
 
     template <typename Invocable, typename Signature, typename Arg>
-    template <typename TaskFunc, typename... Args, typename TaskBuilder>
+    template <typename TaskFunc, typename... Args>
     auto Task::Builder<Invocable, Signature, Arg, true>::onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
     {
         auto task = static_cast<Invocable*>(this->_task->getLastTask());
         task->setupExceptionCallback(executor, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
-        return TaskBuilder{std::move(this->_task), this->_current, this->_last};
+        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
+    }
+
+    template <typename Invocable, typename Signature, typename Arg>
+    template <typename TaskFunc, typename... Args, typename>
+    auto Task::Builder<Invocable, Signature, Arg, true>::onException(TaskFunc&& func, Args&&... args)
+    {
+        auto task = static_cast<Invocable*>(this->_task->getLastTask());
+        task->setupExceptionCallback(this->_task->getExecutor(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
     }
 
     /// Task implementation
@@ -918,7 +934,7 @@ namespace vanilo::tasker {
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
     auto Task::run(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
     {
-        constexpr bool HasToken = std::is_same_v<typename std::decay<typename TaskBuilder::FirstArg>::type, CancellationToken>;
+        constexpr bool HasToken = std::is_same_v<typename std::decay_t<typename TaskBuilder::FirstArg>, CancellationToken>;
         constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
 
         auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, IsMember, HasToken>::createInvocable(

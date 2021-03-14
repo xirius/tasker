@@ -39,20 +39,20 @@ namespace vanilo::core::traits {
             };
         };
 
-#define FUNCTION_TRAITS_TEMPLATE(REF)                                                 \
-    template <typename TReturn, typename... Args>                                     \
-    struct FunctionTraitsBase<TReturn (*)(Args...) REF>                               \
-    {                                                                                 \
-        using ReturnType   = TReturn;                                                 \
-        using ClassType    = void;                                                    \
-        using ArgsType     = typename std::tuple<Args...>;                            \
-        using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>; \
-                                                                                      \
-        template <std::size_t N>                                                      \
-        using Arg = typename Arguments<Args...>::template Element<N>::Type;           \
-                                                                                      \
-        static constexpr auto Arity    = sizeof...(Args);                             \
-        static constexpr bool IsLambda = false;                                       \
+#define FUNCTION_TRAITS_TEMPLATE(REF)                                             \
+    template <typename TReturn, typename... Args>                                 \
+    struct FunctionTraitsBase<TReturn (*)(Args...) REF>                           \
+    {                                                                             \
+        using ReturnType   = TReturn;                                             \
+        using ClassType    = void;                                                \
+        using ArgsType     = typename std::tuple<Args...>;                        \
+        using PureArgsType = typename std::tuple<typename std::decay_t<Args>...>; \
+                                                                                  \
+        template <std::size_t N>                                                  \
+        using Arg = typename Arguments<Args...>::template Element<N>::Type;       \
+                                                                                  \
+        static constexpr auto Arity    = sizeof...(Args);                         \
+        static constexpr bool IsLambda = false;                                   \
     };
 
         FUNCTION_TRAITS_TEMPLATE()
@@ -60,20 +60,20 @@ namespace vanilo::core::traits {
 
 #undef FUNCTION_TRAITS_TEMPLATE
 
-#define MEMBER_FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)                        \
-    template <typename TReturn, typename TClass, typename... Args>                    \
-    struct FunctionTraitsBase<TReturn (TClass::*)(Args...) CV REF>                    \
-    {                                                                                 \
-        using ReturnType   = TReturn;                                                 \
-        using ClassType    = TClass;                                                  \
-        using ArgsType     = typename std::tuple<Args...>;                            \
-        using PureArgsType = typename std::tuple<typename std::decay<Args>::type...>; \
-                                                                                      \
-        template <std::size_t N>                                                      \
-        using Arg = typename Arguments<Args...>::template Element<N>::Type;           \
-                                                                                      \
-        static constexpr auto Arity    = sizeof...(Args);                             \
-        static constexpr bool IsLambda = false;                                       \
+#define MEMBER_FUNCTION_TRAITS_TEMPLATE(CV, REF, L_VAL, R_VAL)                    \
+    template <typename TReturn, typename TClass, typename... Args>                \
+    struct FunctionTraitsBase<TReturn (TClass::*)(Args...) CV REF>                \
+    {                                                                             \
+        using ReturnType   = TReturn;                                             \
+        using ClassType    = TClass;                                              \
+        using ArgsType     = typename std::tuple<Args...>;                        \
+        using PureArgsType = typename std::tuple<typename std::decay_t<Args>...>; \
+                                                                                  \
+        template <std::size_t N>                                                  \
+        using Arg = typename Arguments<Args...>::template Element<N>::Type;       \
+                                                                                  \
+        static constexpr auto Arity    = sizeof...(Args);                         \
+        static constexpr bool IsLambda = false;                                   \
     };
 
 #define FUNCTION_TRAITS(REF, L_VAL, R_VAL)                     \

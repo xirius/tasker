@@ -35,10 +35,10 @@ namespace vanilo::core::binder {
         struct Bind;
 
         template <typename Func, typename... Args>
-        struct BindHelper: public ArityChecker<typename std::decay<Func>::type, Args...>
+        struct BindHelper: public ArityChecker<typename std::decay_t<Func>, Args...>
         {
-            using FuncType = typename std::decay<Func>::type;
-            using Type     = internal::Bind<FuncType(typename std::decay<Args>::type...)>;
+            using FuncType = typename std::decay_t<Func>;
+            using Type     = internal::Bind<FuncType(typename std::decay_t<Args>...)>;
         };
 
         template <typename Functor, typename... BoundArgs>
