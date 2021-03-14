@@ -74,7 +74,7 @@ SCENARIO("Test the flow of the LocalThreadExecutor", "[local executor]")
     }
 }
 
-SCENARIO("Test ThreadPoolExecutor", "[pool executor]")
+SCENARIO("Test resizing of ThreadPoolExecutor", "[pool executor]")
 {
     GIVEN("An initial executor with 0 threads")
     {
@@ -103,6 +103,61 @@ SCENARIO("Test ThreadPoolExecutor", "[pool executor]")
             {
                 future.get();
                 REQUIRE(executor->threadCount() == 0);
+            }
+        }
+    }
+
+    GIVEN("An initial executor with 10 threads")
+    {
+        auto executor = ThreadPoolExecutor::create(10);
+
+        WHEN("Resized to 25")
+        {
+            auto future = executor->resize(5);
+
+            THEN("The thread count should return 5")
+            {
+                future.get();
+                REQUIRE(executor->threadCount() == 5);
+            }
+        }
+
+        WHEN("Resized to 0")
+        {
+            auto future = executor->resize(0);
+
+            THEN("The thread count should return 0")
+            {
+                future.get();
+                REQUIRE(executor->threadCount() == 0);
+            }
+        }
+    }
+}
+
+SCENARIO("Test cancellation of tasks when ThreadPoolExecutor is released", "[pool executor]")
+{
+    GIVEN("An initial executor with 0 threads")
+    {
+        auto executor    = ThreadPoolExecutor::create(0);
+        bool isCancelled = false;
+        bool nonExecuted = true;
+
+        WHEN("Task is submitted and executor is then released")
+        {
+            Task::run(executor.get(), [&nonExecuted]() {
+                nonExecuted = false;
+            }).onException(executor.get(), [&isCancelled](std::exception& ex, CancellationToken& token) {
+                isCancelled = token.isCanceled();
+            });
+
+            executor.reset();
+
+            THEN("The task should be canceled")
+            {
+                REQUIRE(executor == nullptr);
+                REQUIRE(nonExecuted);
+                REQUIRE(isCancelled);
             }
         }
     }

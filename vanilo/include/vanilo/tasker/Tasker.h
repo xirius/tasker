@@ -373,13 +373,12 @@ namespace vanilo::tasker {
             template <typename Functor, typename... Args>
             void setupExceptionCallback(TaskExecutor* executor, Functor&& functor, Args&&... args)
             {
-                _errorExecutor = executor;
+                _errorExecutor = this->_executor == executor ? nullptr : executor;
                 _errorMetadata = std::make_any<std::tuple<Functor, std::tuple<Args...>>>(
                     std::make_tuple(std::forward<Functor>(functor), std::forward_as_tuple(std::forward<Args>(args)...)));
 
-                _errorHandler = [isSameExecutor = this->_executor == executor](
-                                    TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata,
-                                    std::exception_ptr& exPtr) {
+                _errorHandler = [](TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata,
+                                   std::exception_ptr& exPtr) {
                     auto exceptionTask = core::binder::bind(
                         [](CancellationToken& token, Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
                             auto [func, args] = std::move(std::any_cast<std::tuple<Functor, std::tuple<Args...>>>(metadata));
@@ -410,13 +409,13 @@ namespace vanilo::tasker {
                         },
                         std::move(token), std::move(task), std::move(metadata), exPtr);
 
-                    // If another executor is provided where the exception has to be handled
-                    if (isSameExecutor) {
-                        exceptionTask();
-                    }
-                    else {
+                    // If the executor is provided then submit the exception handling on it
+                    if (executor != nullptr) {
                         executor->submit(
                             std::make_unique<internal::Invocable<decltype(exceptionTask), void, void>>(executor, std::move(exceptionTask)));
+                    }
+                    else {
+                        exceptionTask();
                     }
 
                     return true; // Exception was handled
@@ -452,12 +451,20 @@ namespace vanilo::tasker {
             template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
+                if (this->_token.isCanceled()) {
+                    throw CancellationException{};
+                }
+
                 return _task();
             }
 
             template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
+                if (this->_token.isCanceled()) {
+                    throw CancellationException{};
+                }
+
                 return invoke(this->_param);
             }
 
@@ -532,6 +539,10 @@ namespace vanilo::tasker {
             template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
+                if (this->_token.isCanceled()) {
+                    throw CancellationException{};
+                }
+
                 _promise.set_value(_task());
                 return Result{}; // Since PromisedTask is the last one this value will never be used
             }
@@ -539,6 +550,10 @@ namespace vanilo::tasker {
             template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
+                if (this->_token.isCanceled()) {
+                    throw CancellationException{};
+                }
+
                 _promise.set_value(invoke(this->_param));
                 return Result{}; // Since PromisedTask is the last one this value will never be used
             }

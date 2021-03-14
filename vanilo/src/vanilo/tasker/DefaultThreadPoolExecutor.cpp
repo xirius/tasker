@@ -70,11 +70,15 @@ size_t DefaultThreadPoolExecutor::count() const
     return _queue.size();
 }
 
+size_t DefaultThreadPoolExecutor::threadCount() const noexcept
+{
+    return _threads.size();
+}
+
 std::future<void> DefaultThreadPoolExecutor::resize(size_t numThreads)
 {
     std::lock_guard<std::mutex> _lock{_mutex};
     auto promise = std::make_shared<std::promise<void>>();
-    auto future  = promise->get_future();
 
     if (_threads.size() < numThreads) {
         for (auto i = _threads.size(); i < numThreads; i++) {
@@ -82,7 +86,7 @@ std::future<void> DefaultThreadPoolExecutor::resize(size_t numThreads)
         }
 
         promise->set_value();
-        return future;
+        return promise->get_future();
     }
 
     if (_threads.size() > numThreads) {
@@ -91,25 +95,20 @@ std::future<void> DefaultThreadPoolExecutor::resize(size_t numThreads)
 
         for (auto i = _threads.size(); i > numThreads; i--) {
             if (_threads.tryDequeue(thread)) {
-                submit(std::make_unique<StopThreadTask>(this, std::move(thread), promise, std::move(counter)));
+                submit(std::make_unique<StopThreadTask>(this, std::move(thread), promise, counter));
             }
         }
 
-        return future;
+        return promise->get_future();
     }
 
     promise->set_value();
-    return future;
+    return promise->get_future();
 }
 
 void DefaultThreadPoolExecutor::submit(std::unique_ptr<Task> task)
 {
     _queue.enqueue(std::move(task));
-}
-
-size_t DefaultThreadPoolExecutor::threadCount() const noexcept
-{
-    return _threads.size();
 }
 
 //! Private members
@@ -131,7 +130,7 @@ void DefaultThreadPoolExecutor::invalidate()
 
     for (auto& task : tasks) {
         task->cancel();
-        // Not enough !!!
+        task->run();
     }
 
     std::thread thread;
