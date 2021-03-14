@@ -147,11 +147,9 @@ namespace vanilo::tasker {
             virtual ~BaseTaskBuilder();
 
           protected:
-            BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* current, internal::ChainableTask* last);
+            explicit BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task);
 
             std::unique_ptr<internal::ChainableTask> _task;
-            internal::ChainableTask* _current;
-            internal::ChainableTask* _last;
         };
     } // namespace internal
 
@@ -172,7 +170,11 @@ namespace vanilo::tasker {
         auto then(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
 
       protected:
-        using BaseTaskBuilder::BaseTaskBuilder;
+        Builder(std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* current, internal::ChainableTask* last);
+
+        internal::ChainableTask* _current;
+        internal::ChainableTask* _last;
+        // using BaseTaskBuilder::BaseTaskBuilder;
     };
 
     template <typename Invocable, typename Signature, typename Arg>
@@ -838,9 +840,7 @@ namespace vanilo::tasker {
         /// BaseTaskBuilder implementation
         /// ========================================================================================
 
-        inline BaseTaskBuilder::BaseTaskBuilder(
-            std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* current, internal::ChainableTask* last)
-            : _task{std::move(task)}, _current{current}, _last{last}
+        inline BaseTaskBuilder::BaseTaskBuilder(std::unique_ptr<internal::ChainableTask> task): _task{std::move(task)}
         {
         }
 
@@ -855,6 +855,13 @@ namespace vanilo::tasker {
 
     /// Task::Builder implementation
     /// ============================================================================================
+
+    template <typename Invocable, typename Signature, typename Arg>
+    Task::Builder<Invocable, Signature, Arg, false>::Builder(
+        std::unique_ptr<internal::ChainableTask> task, internal::ChainableTask* current, internal::ChainableTask* last)
+        : BaseTaskBuilder(std::move(task)), _current{current}, _last{last}
+    {
+    }
 
     template <typename Invocable, typename Signature, typename Arg>
     template <typename TaskFunc, typename... Args, typename TaskBuilder>
