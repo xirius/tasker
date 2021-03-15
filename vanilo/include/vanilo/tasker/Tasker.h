@@ -1,10 +1,9 @@
 #ifndef INC_CF1B33A15FDE47BDA967EACB24A90BED
 #define INC_CF1B33A15FDE47BDA967EACB24A90BED
 
-#include <vanilo/Export.h>
+#include <vanilo/concurrent/CancellationToken.h>
 #include <vanilo/core/Binder.h>
 #include <vanilo/core/Tracer.h>
-#include <vanilo/tasker/CancellationToken.h>
 
 #include <any>
 #include <cassert>
@@ -41,6 +40,8 @@ namespace vanilo::tasker {
         class Builder;
 
       public:
+        using CancellationToken = concurrent::CancellationToken;
+
         template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, void>>
         static auto run(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
 
@@ -59,11 +60,6 @@ namespace vanilo::tasker {
     class TaskExecutor
     {
       public:
-        /**
-         * The number of concurrent threads supported by the implementation.
-         */
-        static size_t DefaultThreadNumber;
-
         virtual ~TaskExecutor() = default;
 
         /**
@@ -84,13 +80,22 @@ namespace vanilo::tasker {
     class VANILO_EXPORT LocalThreadExecutor: public TaskExecutor
     {
       public:
+        using CancellationToken = concurrent::CancellationToken;
+
         static std::unique_ptr<LocalThreadExecutor> create();
 
         /**
+         * Processes max number of tasks in the queue if any present.
          * @param maxCount the maximum number of task to process.
          * @return The number of the unprocessed tasks in the queue.
          */
         virtual size_t process(size_t maxCount) = 0;
+
+        /**
+         * Processes the tasks in the queue until the provided token is canceled.
+         * @param token The cancellation token.
+         */
+        virtual void process(const CancellationToken& token) = 0;
     };
 
     /// ThreadPoolExecutor interface
@@ -99,6 +104,11 @@ namespace vanilo::tasker {
     class VANILO_EXPORT ThreadPoolExecutor: public TaskExecutor
     {
       public:
+        /**
+         * The number of concurrent threads supported by the implementation.
+         */
+        static size_t DefaultThreadNumber;
+
         /**
          * Creates a new thread pool executor with the default number of threads.
          * @return The new instance of the default ThreadPoolExecutor.
@@ -203,6 +213,7 @@ namespace vanilo::tasker {
     };
 
     namespace internal {
+        using CancellationToken = concurrent::CancellationToken;
 
         /// ArityChecker implementation
         /// ========================================================================================

@@ -2,6 +2,7 @@
 
 #include <catch2/catch.hpp>
 
+using namespace vanilo::concurrent;
 using namespace vanilo::tasker;
 
 void test_11(int& result)

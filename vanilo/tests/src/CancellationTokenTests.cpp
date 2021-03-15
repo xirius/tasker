@@ -1,8 +1,8 @@
-#include <vanilo/tasker/CancellationToken.h>
+#include <vanilo/concurrent/CancellationToken.h>
 
 #include <catch2/catch.hpp>
 
-using namespace vanilo::tasker;
+using namespace vanilo::concurrent;
 
 TEST_CASE("Equality operator should return false for two distinct tokens", "[token]")
 {

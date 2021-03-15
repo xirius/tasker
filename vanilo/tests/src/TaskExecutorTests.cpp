@@ -2,6 +2,7 @@
 
 #include <catch2/catch.hpp>
 
+using namespace vanilo::concurrent;
 using namespace vanilo::tasker;
 
 class CustomTask: public Task

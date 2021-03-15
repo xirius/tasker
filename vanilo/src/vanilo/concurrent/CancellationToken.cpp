@@ -1,6 +1,6 @@
-#include <vanilo/tasker/CancellationToken.h>
+#include <vanilo/concurrent/CancellationToken.h>
 
-using namespace vanilo::tasker;
+using namespace vanilo::concurrent;
 
 /// CancellationToken::Impl
 /// ========================================================================

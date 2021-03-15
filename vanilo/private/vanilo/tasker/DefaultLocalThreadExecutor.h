@@ -1,9 +1,8 @@
 #ifndef INC_2270EF516D0140F1801160B8CE45015E
 #define INC_2270EF516D0140F1801160B8CE45015E
 
+#include <vanilo/concurrent/ConcurrentQueue.h>
 #include <vanilo/tasker/Tasker.h>
-
-#include <queue>
 
 namespace vanilo::tasker {
 
@@ -15,13 +14,11 @@ namespace vanilo::tasker {
       public:
         [[nodiscard]] size_t count() const override;
         size_t process(size_t maxCount) override;
+        void process(const CancellationToken& token) override;
         void submit(std::unique_ptr<Task> task) override;
 
       private:
-        std::unique_ptr<Task> nextTask(size_t& queueSize);
-
-        std::queue<std::unique_ptr<Task>> _queue;
-        std::atomic<size_t> _queueSize{0};
+        concurrent::ConcurrentQueue<std::unique_ptr<Task>> _queue;
         mutable std::mutex _mutex;
     };
 

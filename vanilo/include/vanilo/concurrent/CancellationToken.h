@@ -4,7 +4,7 @@
 #include <atomic>
 #include <memory>
 
-namespace vanilo::tasker {
+namespace vanilo::concurrent {
 
     /**
      * Object used to propagate notification that operations should be canceled.
@@ -25,4 +25,4 @@ namespace vanilo::tasker {
         std::shared_ptr<Impl> _impl;
     };
 
-} // namespace vanilo::tasker
+} // namespace vanilo::concurrent
