@@ -95,7 +95,7 @@ namespace vanilo::tasker {
          * Processes the tasks in the queue until the provided token is canceled.
          * @param token The cancellation token.
          */
-        virtual void process(const CancellationToken& token) = 0;
+        virtual size_t process(CancellationToken& token) = 0;
     };
 
     /// ThreadPoolExecutor interface

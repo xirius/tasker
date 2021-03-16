@@ -45,9 +45,15 @@ size_t DefaultLocalThreadExecutor::process(size_t maxCount)
     return _queue.size();
 }
 
-void DefaultLocalThreadExecutor::process(const CancellationToken& token)
+size_t DefaultLocalThreadExecutor::process(CancellationToken& token)
 {
-    //_queue.waitDequeue();
+    std::unique_ptr<Task> task;
+
+    while (_queue.waitDequeue(token, task)) {
+        executeTask(task);
+    }
+
+    return _queue.size();
 }
 
 void DefaultLocalThreadExecutor::submit(std::unique_ptr<Task> task)
