@@ -65,24 +65,29 @@ bool CancellationToken::isCanceled() const noexcept
     return _impl->canceled.load();
 }
 
-CancellationToken::RegistrationToken CancellationToken::registerAction(std::function<void()> callback)
+CancellationToken::Subscription CancellationToken::subscribe(std::function<void()> callback)
 {
     std::lock_guard<std::mutex> lock{_impl->mutex};
-    RegistrationToken token{*this};
+    Subscription token{*this};
     _impl->callbacks.emplace(reinterpret_cast<uintptr_t>(token._impl.get()), std::move(callback));
     return token;
 }
 
-/// RegistrationToken::Impl
+/// Subscription::Impl
 /// ========================================================================
 
-struct CancellationToken::RegistrationToken::Impl
+struct CancellationToken::Subscription::Impl
 {
     explicit Impl(CancellationToken& token): object{token._impl}, id{reinterpret_cast<uintptr_t>(this)}
     {
     }
 
     ~Impl()
+    {
+        unsubscribe();
+    }
+
+    void unsubscribe() const
     {
         if (auto token = object.lock()) {
             token->unregister(id);
@@ -93,11 +98,16 @@ struct CancellationToken::RegistrationToken::Impl
     uintptr_t id;
 };
 
-/// RegistrationToken
+/// Subscription
 /// ========================================================================
 
-CancellationToken::RegistrationToken::RegistrationToken(CancellationToken& token): _impl{std::make_unique<RegistrationToken::Impl>(token)}
+CancellationToken::Subscription::Subscription(CancellationToken& token): _impl{std::make_unique<Subscription::Impl>(token)}
 {
 }
 
-CancellationToken::RegistrationToken::~RegistrationToken() = default;
+CancellationToken::Subscription::~Subscription() = default;
+
+void CancellationToken::Subscription::unsubscribe() const
+{
+    _impl->unsubscribe();
+}

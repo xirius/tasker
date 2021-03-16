@@ -1,7 +1,8 @@
 #ifndef INC_D8C0265AC7204A5F8B06B620B9F01B70
 #define INC_D8C0265AC7204A5F8B06B620B9F01B70
 
-#include <atomic>
+#include <vanilo/concurrent/CancellationToken.h>
+
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -96,6 +97,33 @@ namespace vanilo::concurrent {
             _condition.wait(lock, [this]() { return !_queue.empty() || !_valid; });
 
             if (!_valid) {
+                return false;
+            }
+
+            out = std::move(_queue.front());
+            _queue.pop();
+
+            return true;
+        }
+
+        /**
+         * Retrieves the first element from the queue (blocking). The element is removed from the queue.
+         * This method blocks until an element is available or unless clear is called, cancellation token
+         * is in canceled state or the instance is destructed.
+         * @param token The cancellation token.
+         * @param out The retrieved element from the queue.
+         * @return True if an element was successfully written to the out parameter, false otherwise.
+         */
+        bool waitDequeue(CancellationToken& token, T& out)
+        {
+            std::unique_lock<std::mutex> lock{_mutex};
+            auto subscription = token.subscribe([this]() { _condition.notify_all(); });
+
+            // Using the condition in the predicate ensures that spurious wake ups with a valid
+            // but empty queue will not proceed, so only need to check for validity before proceeding.
+            _condition.wait(lock, [this, &token]() { return !_queue.empty() || token.isCanceled() || !_valid; });
+
+            if (token.isCanceled() || !_valid) {
                 return false;
             }
 

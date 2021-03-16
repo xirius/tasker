@@ -13,7 +13,7 @@ namespace vanilo::concurrent {
     class VANILO_EXPORT CancellationToken
     {
       public:
-        class RegistrationToken;
+        class Subscription;
 
         CancellationToken();
 
@@ -22,23 +22,25 @@ namespace vanilo::concurrent {
 
         void cancel() noexcept;
         [[nodiscard]] bool isCanceled() const noexcept;
-        RegistrationToken registerAction(std::function<void()> callback);
+        Subscription subscribe(std::function<void()> callback);
 
       private:
         struct Impl;
         std::shared_ptr<Impl> _impl;
     };
 
-    class VANILO_EXPORT CancellationToken::RegistrationToken
+    class VANILO_EXPORT CancellationToken::Subscription
     {
         friend CancellationToken;
 
       public:
-        RegistrationToken(RegistrationToken&& other) noexcept = default;
-        ~RegistrationToken();
+        Subscription(Subscription&& other) noexcept = default;
+        ~Subscription();
+
+        void unsubscribe() const;
 
       private:
-        explicit RegistrationToken(CancellationToken& token);
+        explicit Subscription(CancellationToken& token);
 
         struct Impl;
         std::unique_ptr<Impl> _impl;
