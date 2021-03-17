@@ -20,7 +20,7 @@ namespace vanilo::concurrent {
         bool operator==(const CancellationToken& other) const noexcept;
         bool operator!=(const CancellationToken& other) const noexcept;
 
-        void cancel() noexcept;
+        void cancel();
         [[nodiscard]] bool isCanceled() const noexcept;
         Subscription subscribe(std::function<void()> callback);
 

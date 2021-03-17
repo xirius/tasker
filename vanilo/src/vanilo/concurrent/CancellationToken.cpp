@@ -11,8 +11,11 @@ using namespace vanilo::concurrent;
 
 struct CancellationToken::Impl
 {
-    void notify()
+    void cancel()
     {
+        canceled.store(true);
+
+        std::lock_guard<std::mutex> lock{mutex};
         for (auto& pair : callbacks) {
             try {
                 pair.second();
@@ -26,7 +29,14 @@ struct CancellationToken::Impl
         }
     }
 
-    void unregister(uintptr_t id)
+    template <typename Callback>
+    void subscribe(uintptr_t id, Callback&& callback)
+    {
+        std::lock_guard<std::mutex> lock{mutex};
+        callbacks.emplace(id, std::forward<Callback>(callback));
+    }
+
+    void unsubscribe(uintptr_t id)
     {
         std::lock_guard<std::mutex> lock{mutex};
         callbacks.erase(id);
@@ -54,10 +64,9 @@ bool CancellationToken::operator!=(const CancellationToken& other) const noexcep
     return _impl != other._impl;
 }
 
-void CancellationToken::cancel() noexcept
+void CancellationToken::cancel()
 {
-    _impl->canceled.store(true);
-    _impl->notify();
+    _impl->cancel();
 }
 
 bool CancellationToken::isCanceled() const noexcept
@@ -67,9 +76,8 @@ bool CancellationToken::isCanceled() const noexcept
 
 CancellationToken::Subscription CancellationToken::subscribe(std::function<void()> callback)
 {
-    std::lock_guard<std::mutex> lock{_impl->mutex};
     Subscription token{*this};
-    _impl->callbacks.emplace(reinterpret_cast<uintptr_t>(token._impl.get()), std::move(callback));
+    _impl->subscribe(reinterpret_cast<uintptr_t>(token._impl.get()), std::move(callback));
     return token;
 }
 
@@ -90,7 +98,7 @@ struct CancellationToken::Subscription::Impl
     void unsubscribe() const
     {
         if (auto token = object.lock()) {
-            token->unregister(id);
+            token->unsubscribe(id);
         }
     }
 
