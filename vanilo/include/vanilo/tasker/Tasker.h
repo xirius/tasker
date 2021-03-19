@@ -17,7 +17,7 @@ namespace vanilo::tasker {
     /**
      * This exception occur when you're waiting for a result, then a cancellation is notified.
      */
-    class CancellationException final: public std::exception
+    class CanceledException final: public std::exception
     {
       public:
         [[nodiscard]] const char* what() const noexcept override
@@ -342,8 +342,9 @@ namespace vanilo::tasker {
 
             inline void scheduleNext()
             {
+                auto executor = _next->_executor;
                 _next->_token = std::move(_token);
-                _next->_executor->submit(std::move(_next));
+                executor->submit(std::move(_next));
             }
 
             TaskExecutor* _executor;
@@ -483,8 +484,8 @@ namespace vanilo::tasker {
             template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
-                if (this->_token.isCanceled()) {
-                    throw CancellationException{};
+                if (this->_token.isCancellationRequested()) {
+                    throw CanceledException{};
                 }
 
                 return _task();
@@ -493,8 +494,8 @@ namespace vanilo::tasker {
             template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
-                if (this->_token.isCanceled()) {
-                    throw CancellationException{};
+                if (this->_token.isCancellationRequested()) {
+                    throw CanceledException{};
                 }
 
                 return invoke(this->_param);
@@ -571,8 +572,8 @@ namespace vanilo::tasker {
             template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
-                if (this->_token.isCanceled()) {
-                    throw CancellationException{};
+                if (this->_token.isCancellationRequested()) {
+                    throw CanceledException{};
                 }
 
                 _promise.set_value(_task());
@@ -582,8 +583,8 @@ namespace vanilo::tasker {
             template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
             inline Result executeTask()
             {
-                if (this->_token.isCanceled()) {
-                    throw CancellationException{};
+                if (this->_token.isCancellationRequested()) {
+                    throw CanceledException{};
                 }
 
                 _promise.set_value(invoke(this->_param));
@@ -698,9 +699,9 @@ namespace vanilo::tasker {
                         this->executeTask();
                     }
                 }
-                catch (CancellationException& ex) {
+                catch (CanceledException& ex) {
                     this->_token.cancel();
-                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
+                    this->handleException(std::make_exception_ptr(CanceledException{ex}));
                 }
                 catch (...) {
                     this->handleException(std::current_exception());
@@ -734,9 +735,9 @@ namespace vanilo::tasker {
                         this->executeTask();
                     }
                 }
-                catch (CancellationException& ex) {
+                catch (CanceledException& ex) {
                     this->_token.cancel();
-                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
+                    this->handleException(std::make_exception_ptr(CanceledException{ex}));
                 }
                 catch (...) {
                     this->handleException(std::current_exception());
@@ -767,9 +768,9 @@ namespace vanilo::tasker {
                         this->scheduleNext();
                     }
                 }
-                catch (CancellationException& ex) {
+                catch (CanceledException& ex) {
                     this->_token.cancel();
-                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
+                    this->handleException(std::make_exception_ptr(CanceledException{ex}));
                 }
                 catch (...) {
                     this->handleException(std::current_exception());
@@ -800,9 +801,9 @@ namespace vanilo::tasker {
                         this->scheduleNext();
                     }
                 }
-                catch (CancellationException& ex) {
+                catch (CanceledException& ex) {
                     this->_token.cancel();
-                    this->handleException(std::make_exception_ptr(CancellationException{ex}));
+                    this->handleException(std::make_exception_ptr(CanceledException{ex}));
                 }
                 catch (...) {
                     this->handleException(std::current_exception());
@@ -865,7 +866,8 @@ namespace vanilo::tasker {
         inline BaseTaskBuilder::~BaseTaskBuilder()
         {
             if (_task) { // Schedule task on the executor
-                _task->getExecutor()->submit(std::move(_task));
+                auto executor = _task->getExecutor();
+                executor->submit(std::move(_task));
             }
         }
 
