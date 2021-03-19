@@ -1,24 +1,30 @@
 #include <vanilo/concurrent/CancellationToken.h>
 #include <vanilo/core/Tracer.h>
 
-#include <map>
 #include <mutex>
+#include <vector>
 
 using namespace vanilo::concurrent;
 
-/// CancellationToken::Impl
+/// CancellationToken::Subscription::Impl
 /// ========================================================================
 
-struct CancellationToken::Impl
+struct CancellationToken::Subscription::Impl
 {
-    void cancel()
+    explicit Impl(std::function<void()> callback): _callback{std::move(callback)}
     {
-        canceled.store(true);
+    }
 
-        std::lock_guard<std::mutex> lock{mutex};
-        for (auto& pair : callbacks) {
+    void unsubscribe()
+    {
+        _callback = nullptr;
+    }
+
+    void notify() const
+    {
+        if (_callback) {
             try {
-                pair.second();
+                _callback();
             }
             catch (const std::exception& ex) {
                 TRACE("An unhandled exception occurred during cancellation notification. Message: %s", ex.what());
@@ -29,26 +35,48 @@ struct CancellationToken::Impl
         }
     }
 
-    template <typename Callback>
-    void subscribe(uintptr_t id, Callback&& callback)
+    std::function<void()> _callback;
+};
+
+/// CancellationToken::Impl
+/// ========================================================================
+
+struct CancellationToken::Impl
+{
+    void cancel()
     {
-        std::lock_guard<std::mutex> lock{mutex};
-        callbacks.emplace(id, std::forward<Callback>(callback));
+        canceled.store(true);
+
+        for (auto& subscription : subscriptions) {
+            if (auto object = subscription.lock()) {
+                object->notify();
+            }
+        }
     }
 
-    void unsubscribe(uintptr_t id)
+    void subscribe(std::weak_ptr<CancellationToken::Subscription::Impl> subscription)
     {
         std::lock_guard<std::mutex> lock{mutex};
-        callbacks.erase(id);
+
+        // No additional subscription can be made if the cancellation has been requested
+        if (!canceled) {
+            subscriptions.push_back(std::move(subscription));
+        }
     }
 
+    std::vector<std::weak_ptr<CancellationToken::Subscription::Impl>> subscriptions{};
     std::atomic<bool> canceled{};
-    std::map<uintptr_t, std::function<void()>> callbacks{};
     std::mutex mutex{};
 };
 
 /// CancellationToken
 /// ========================================================================
+
+CancellationToken CancellationToken::none()
+{
+    static CancellationToken token;
+    return token;
+}
 
 CancellationToken::CancellationToken(): _impl{std::make_shared<Impl>()}
 {
@@ -69,49 +97,23 @@ void CancellationToken::cancel()
     _impl->cancel();
 }
 
-bool CancellationToken::isCanceled() const noexcept
+bool CancellationToken::isCancellationRequested() const noexcept
 {
     return _impl->canceled.load();
 }
 
 CancellationToken::Subscription CancellationToken::subscribe(std::function<void()> callback)
 {
-    Subscription token{*this};
-    _impl->subscribe(reinterpret_cast<uintptr_t>(token._impl.get()), std::move(callback));
+    Subscription token;
+    token._impl = std::make_shared<CancellationToken::Subscription::Impl>(std::move(callback));
+    _impl->subscribe(token._impl);
     return token;
 }
-
-/// Subscription::Impl
-/// ========================================================================
-
-struct CancellationToken::Subscription::Impl
-{
-    explicit Impl(CancellationToken& token): object{token._impl}, id{reinterpret_cast<uintptr_t>(this)}
-    {
-    }
-
-    ~Impl()
-    {
-        unsubscribe();
-    }
-
-    void unsubscribe() const
-    {
-        if (auto token = object.lock()) {
-            token->unsubscribe(id);
-        }
-    }
-
-    std::weak_ptr<CancellationToken::Impl> object;
-    uintptr_t id;
-};
 
 /// Subscription
 /// ========================================================================
 
-CancellationToken::Subscription::Subscription(CancellationToken& token): _impl{std::make_unique<Subscription::Impl>(token)}
-{
-}
+CancellationToken::Subscription::Subscription() = default;
 
 CancellationToken::Subscription::~Subscription() = default;
 

@@ -32,10 +32,10 @@ SCENARIO("Token state must change with cancellation", "[token]")
 
         WHEN("No cancellation has been performed")
         {
-            THEN("isCanceled should return false")
+            THEN("isCancellationRequested should return false")
             {
-                REQUIRE_FALSE(token1.isCanceled());
-                REQUIRE_FALSE(token2.isCanceled());
+                REQUIRE_FALSE(token1.isCancellationRequested());
+                REQUIRE_FALSE(token2.isCancellationRequested());
             }
         }
 
@@ -43,10 +43,10 @@ SCENARIO("Token state must change with cancellation", "[token]")
         {
             token2.cancel();
 
-            THEN("isCanceled should return true")
+            THEN("isCancellationRequested should return true")
             {
-                REQUIRE(token1.isCanceled());
-                REQUIRE(token2.isCanceled());
+                REQUIRE(token1.isCancellationRequested());
+                REQUIRE(token2.isCancellationRequested());
             }
         }
     }

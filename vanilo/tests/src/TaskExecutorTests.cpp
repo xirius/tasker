@@ -149,7 +149,7 @@ SCENARIO("Test cancellation of tasks when ThreadPoolExecutor is released", "[poo
             Task::run(executor.get(), [&nonExecuted]() {
                 nonExecuted = false;
             }).onException(executor.get(), [&isCancelled](std::exception& ex, CancellationToken& token) {
-                isCancelled = token.isCanceled() && dynamic_cast<CancellationException*>(&ex) != nullptr;
+                isCancelled = token.isCancellationRequested() && dynamic_cast<CanceledException*>(&ex) != nullptr;
             });
 
             executor.reset();

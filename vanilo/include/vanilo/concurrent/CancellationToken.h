@@ -15,13 +15,29 @@ namespace vanilo::concurrent {
       public:
         class Subscription;
 
+        static CancellationToken none();
+
         CancellationToken();
 
         bool operator==(const CancellationToken& other) const noexcept;
         bool operator!=(const CancellationToken& other) const noexcept;
 
+        /**
+         * Communicates a request for cancellation.
+         */
         void cancel();
-        [[nodiscard]] bool isCanceled() const noexcept;
+
+        /**
+         * Gets whether cancellation has been requested.
+         * @return True if cancellation has been requested, false otherwise.
+         */
+        [[nodiscard]] bool isCancellationRequested() const noexcept;
+
+        /**
+         * Registers a delegate that will be called when this CancellationToken is canceled.
+         * @param callback The The callback to be executed when the CancellationToken is canceled.
+         * @return The subscription instance that can be used to unregister the callback.
+         */
         Subscription subscribe(std::function<void()> callback);
 
       private:
@@ -29,21 +45,26 @@ namespace vanilo::concurrent {
         std::shared_ptr<Impl> _impl;
     };
 
+    /**
+     * Represents a callback delegate that has been registered with a CancellationToken.
+     */
     class VANILO_EXPORT CancellationToken::Subscription
     {
         friend CancellationToken;
 
       public:
-        Subscription(Subscription&& other) noexcept = default;
         ~Subscription();
 
+        /**
+         * Unregisters the target callback from the associated CancellationToken.
+         */
         void unsubscribe() const;
 
       private:
-        explicit Subscription(CancellationToken& token);
+        Subscription();
 
         struct Impl;
-        std::unique_ptr<Impl> _impl;
+        std::shared_ptr<Impl> _impl;
     };
 
 } // namespace vanilo::concurrent
