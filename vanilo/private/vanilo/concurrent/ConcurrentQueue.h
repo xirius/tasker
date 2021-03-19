@@ -121,9 +121,9 @@ namespace vanilo::concurrent {
 
             // Using the condition in the predicate ensures that spurious wake ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this, &token]() { return !_queue.empty() || token.isCanceled() || !_valid; });
+            _condition.wait(lock, [this, &token]() { return !_queue.empty() || token.isCancellationRequested() || !_valid; });
 
-            if (token.isCanceled() || !_valid) {
+            if (token.isCancellationRequested() || !_valid) {
                 return false;
             }
 
