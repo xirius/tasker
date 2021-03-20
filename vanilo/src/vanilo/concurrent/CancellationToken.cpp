@@ -56,17 +56,36 @@ struct CancellationToken::Impl
 
     void subscribe(std::weak_ptr<CancellationToken::Subscription::Impl> subscription)
     {
-        std::lock_guard<std::mutex> lock{mutex};
-
         // No additional subscription can be made if the cancellation has been requested
-        if (!canceled) {
-            subscriptions.push_back(std::move(subscription));
+        if (canceled) {
+            return;
         }
+
+        std::lock_guard<std::mutex> lock{mutex};
+        size_t collectionSize = subscriptions.size();
+
+        // Try to reuse freed slots
+        for (size_t i = index; i < collectionSize; i++) {
+            auto& item   = subscriptions[i];
+            auto pointer = item.lock();
+
+            if (!pointer) { // Free slot found
+                item = std::move(subscription);
+                return;
+            }
+
+            index = i;
+        }
+
+        // No free slot found
+        subscriptions.push_back(std::move(subscription));
+        index = 0;
     }
 
     std::vector<std::weak_ptr<CancellationToken::Subscription::Impl>> subscriptions{};
     std::atomic<bool> canceled{};
     std::mutex mutex{};
+    size_t index{0};
 };
 
 /// CancellationToken
