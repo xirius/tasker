@@ -116,12 +116,17 @@ namespace vanilo::concurrent {
          */
         bool waitDequeue(CancellationToken& token, T& out)
         {
-            std::unique_lock<std::mutex> lock{_mutex};
-            auto subscription = token.subscribe([this]() { _condition.notify_all(); });
+            bool canceled     = false;
+            auto subscription = token.subscribe([this, &canceled]() {
+                std::unique_lock<std::mutex> lock{_mutex};
+                canceled = true;
+                _condition.notify_all();
+            });
 
+            std::unique_lock<std::mutex> lock{_mutex};
             // Using the condition in the predicate ensures that spurious wake ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this, &token]() { return !_queue.empty() || token.isCancellationRequested() || !_valid; });
+            _condition.wait(lock, [this, &token, &canceled]() { return !_queue.empty() || canceled || !_valid; });
 
             if (token.isCancellationRequested() || !_valid) {
                 return false;

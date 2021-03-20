@@ -45,24 +45,32 @@ struct CancellationToken::Impl
 {
     void cancel()
     {
-        canceled.store(true);
+        { // Mutually exclusive with subscribe method
+            std::lock_guard<std::mutex> lock{mutex};
+            canceled = true;
+        }
 
+        // Callbacks have to be called without acquired mutex
         for (auto& subscription : subscriptions) {
-            if (auto object = subscription.lock()) {
-                object->notify();
+            if (auto callback = subscription.lock()) {
+                callback->notify();
             }
         }
     }
 
-    void subscribe(std::weak_ptr<CancellationToken::Subscription::Impl> subscription)
+    /**
+     * Registers the callback which is called when the cancellation has been requested.
+     * @return False if the cancellation has been requested and the registration cannot be done, true otherwise.
+     */
+    bool subscribe(std::weak_ptr<CancellationToken::Subscription::Impl> subscription)
     {
         // No additional subscription can be made if the cancellation has been requested
-        if (canceled) {
-            return;
-        }
-
         std::lock_guard<std::mutex> lock{mutex};
         size_t collectionSize = subscriptions.size();
+
+        if (canceled) {
+            return false;
+        }
 
         // Try to reuse freed slots
         for (size_t i = index; i < collectionSize; i++) {
@@ -71,7 +79,7 @@ struct CancellationToken::Impl
 
             if (!pointer) { // Free slot found
                 item = std::move(subscription);
-                return;
+                return true;
             }
 
             index = i;
@@ -80,6 +88,7 @@ struct CancellationToken::Impl
         // No free slot found
         subscriptions.push_back(std::move(subscription));
         index = 0;
+        return true;
     }
 
     std::vector<std::weak_ptr<CancellationToken::Subscription::Impl>> subscriptions{};
@@ -123,10 +132,15 @@ bool CancellationToken::isCancellationRequested() const noexcept
 
 CancellationToken::Subscription CancellationToken::subscribe(std::function<void()> callback)
 {
-    Subscription token;
-    token._impl = std::make_shared<CancellationToken::Subscription::Impl>(std::move(callback));
-    _impl->subscribe(token._impl);
-    return token;
+    Subscription subscription;
+    subscription._impl = std::make_shared<CancellationToken::Subscription::Impl>(std::move(callback));
+
+    // Directly notify the subscriber that the subscription cancellation has been requested
+    if (!_impl->subscribe(subscription._impl)) {
+        subscription._impl->notify();
+    }
+
+    return subscription;
 }
 
 /// Subscription
