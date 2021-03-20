@@ -11,8 +11,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Options
 option(BUILD_SHARED_LIBS "Build shared library [default: true]." True)
-option(BUILD_UNIT_TESTS "Build unit tests [default: true]" True)
-option(BUILD_EXAMPLES "Build examples [default: true]" True)
+option(BUILD_UNIT_TESTS "Build unit tests [default: true]" False)
+option(BUILD_EXAMPLES "Build examples [default: true]" False)
 
 # Building with cmake verbose
 set(CMAKE_VERBOSE_MAKEFILE OFF)
