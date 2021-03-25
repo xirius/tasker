@@ -82,7 +82,7 @@ IncludeBlocks: Regroup
 IncludeCategories:
   - Regex: '^["].*["]'
     Priority: 1
-  - Regex: '^<(vanilo|core|my_lib_1|my_lib_2|my_lib_etc)/'
+  - Regex: '^<(vanilo|core|my_lib_1|my_lib_2|my_lib_etc)/|^<_vanilo.*>$'
     Priority: 2
   - Regex: '^<(catch2|nonstd|third_party_1|third_party_2|third_party_etc)/'
     Priority: 3
