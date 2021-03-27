@@ -143,6 +143,13 @@ CancellationToken::Subscription CancellationToken::subscribe(std::function<void(
     return subscription;
 }
 
+void CancellationToken::throwIfCancellationRequested()
+{
+    if (_impl->canceled) {
+        throw CanceledException();
+    }
+}
+
 /// Subscription
 /// ========================================================================
 
