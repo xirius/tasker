@@ -8,6 +8,18 @@
 namespace vanilo::concurrent {
 
     /**
+     * This exception occur when you're waiting for a result, then a cancellation is notified.
+     */
+    class CanceledException final: public std::exception
+    {
+      public:
+        [[nodiscard]] const char* what() const noexcept override
+        {
+            return "The operation was canceled.";
+        }
+    };
+
+    /**
      * Object used to propagate notification that operations should be canceled.
      */
     class VANILO_EXPORT CancellationToken
@@ -39,6 +51,11 @@ namespace vanilo::concurrent {
          * @return The subscription instance that can be used to unregister the callback.
          */
         Subscription subscribe(std::function<void()> callback);
+
+        /**
+         * Throws a CanceledException if this token has had cancellation requested.
+         */
+        void throwIfCancellationRequested();
 
       private:
         struct Impl;
