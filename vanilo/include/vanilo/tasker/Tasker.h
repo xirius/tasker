@@ -481,7 +481,7 @@ namespace vanilo::tasker {
                 }
             }
 
-            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
+            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, std::nullptr_t> = nullptr>
             inline Result executeTask()
             {
                 if (this->_token.isCancellationRequested()) {
@@ -491,7 +491,7 @@ namespace vanilo::tasker {
                 return _task();
             }
 
-            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
+            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, std::nullptr_t> = nullptr>
             inline Result executeTask()
             {
                 if (this->_token.isCancellationRequested()) {
@@ -569,26 +569,24 @@ namespace vanilo::tasker {
                 _promise.set_exception(std::move(exPtr));
             }
 
-            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
-            inline Result executeTask()
+            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, std::nullptr_t> = nullptr>
+            inline void executeTask()
             {
                 if (this->_token.isCancellationRequested()) {
                     throw CanceledException{};
                 }
 
                 _promise.set_value(_task());
-                return Result{}; // Since PromisedTask is the last one this value will never be used
             }
 
-            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
-            inline Result executeTask()
+            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, std::nullptr_t> = nullptr>
+            inline void executeTask()
             {
                 if (this->_token.isCancellationRequested()) {
                     throw CanceledException{};
                 }
 
                 _promise.set_value(invoke(this->_param));
-                return Result{}; // Since PromisedTask is the last one this value will never be used
             }
 
           private:
@@ -639,16 +637,24 @@ namespace vanilo::tasker {
                 _promise.set_exception(std::move(exPtr));
             }
 
-            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, bool> = true>
+            template <typename T = Arg, typename std::enable_if_t<std::is_void_v<T>, std::nullptr_t> = nullptr>
             inline void executeTask()
             {
+                if (this->_token.isCancellationRequested()) {
+                    throw CanceledException{};
+                }
+
                 _task();
                 _promise.set_value();
             }
 
-            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, bool> = true>
+            template <typename T = Arg, typename std::enable_if_t<!std::is_void_v<T>, std::nullptr_t> = nullptr>
             inline void executeTask()
             {
+                if (this->_token.isCancellationRequested()) {
+                    throw CanceledException{};
+                }
+
                 invoke(this->_param);
                 _promise.set_value();
             }
@@ -690,13 +696,18 @@ namespace vanilo::tasker {
             void run() override
             {
                 try {
-                    if (this->_next) {
-                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
-                        next->setArgument(this->executeTask());
-                        this->scheduleNext();
+                    if constexpr (Promised) {
+                        this->executeTask();
                     }
                     else {
-                        this->executeTask();
+                        if (this->_next) {
+                            auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                            next->setArgument(this->executeTask());
+                            this->scheduleNext();
+                        }
+                        else {
+                            this->executeTask();
+                        }
                     }
                 }
                 catch (CanceledException& ex) {
@@ -726,13 +737,18 @@ namespace vanilo::tasker {
             void run() override
             {
                 try {
-                    if (this->_next) {
-                        auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
-                        next->setArgument(this->executeTask());
-                        this->scheduleNext();
+                    if constexpr (Promised) {
+                        this->executeTask();
                     }
                     else {
-                        this->executeTask();
+                        if (this->_next) {
+                            auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                            next->setArgument(this->executeTask());
+                            this->scheduleNext();
+                        }
+                        else {
+                            this->executeTask();
+                        }
                     }
                 }
                 catch (CanceledException& ex) {
