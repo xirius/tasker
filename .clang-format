@@ -4,10 +4,10 @@ Standard: Latest
 
 AccessModifierOffset: -2
 AlignAfterOpenBracket: AlwaysBreak
-AlignConsecutiveAssignments: true
-AlignConsecutiveBitFields: true
-AlignConsecutiveDeclarations: false
-AlignConsecutiveMacros: true
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveBitFields: Consecutive
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: Consecutive
 AlignEscapedNewlines: Left
 AlignOperands: Align
 AlignTrailingComments: true
@@ -54,7 +54,7 @@ BraceWrapping:
   SplitEmptyNamespace: false
 
 BreakBeforeBinaryOperators: None
-#BreakBeforeConceptDeclarations: true                                 # DOESN'T WORK (YET?)
+BreakBeforeConceptDeclarations: true
 BreakBeforeTernaryOperators: true
 BreakConstructorInitializers: BeforeColon
 BreakInheritanceList: BeforeColon
@@ -70,7 +70,8 @@ Cpp11BracedListStyle: true
 DeriveLineEnding: true
 DerivePointerAlignment: false
 DisableFormat: false
-#EmptyLineBeforeAccessModifier: LogicalBlock                          # DOESN'T WORK (YET?)
+EmptyLineBeforeAccessModifier: LogicalBlock
+ExperimentalAutoDetectBinPacking: false
 FixNamespaceComments: true
 
 ForEachMacros:
@@ -88,18 +89,23 @@ IncludeCategories:
     Priority: 3
   - Regex: '^<.*'
     Priority: 4
-#    SortPriority:    0
+    SortPriority: 0
 IncludeIsMainRegex: '(Test)?$'
+#IncludeIsMainSourceRegex:
 
+#IndentAccessModifiers: true                                           # DOESN'T WORK (YET?)
 IndentCaseBlocks: false
 IndentCaseLabels: true
 IndentExternBlock: Indent
 IndentPPDirectives: None
-#IndentRequires: false                                                # DOESN'T WORK (YET?)
+IndentRequires: false
 IndentWidth: 4
 IndentWrappedFunctionNames: true
+InsertTrailingCommas: None
+
 JavaScriptQuotes: Leave
 JavaScriptWrapImports: true
+
 KeepEmptyLinesAtTheStartOfBlocks: false
 MacroBlockBegin: ''
 MacroBlockEnd: ''
@@ -134,14 +140,15 @@ RawStringFormats:
     CanonicalDelimiter: 'cc'
 
 ReflowComments: true
-SortIncludes: true
+#ShortNamespaceLines: 1                                               # DOESN'T WORK (YET?)
+SortIncludes: CaseSensitive
 SortUsingDeclarations: true
 SpaceAfterCStyleCast: false
 SpaceAfterLogicalNot: false
 SpaceAfterTemplateKeyword: true
-#SpaceAroundPointerQualifiers: Before                                 # DOESN'T WORK (YET?)
+SpaceAroundPointerQualifiers: Before
 SpaceBeforeAssignmentOperators: true
-#SpaceBeforeCaseColon: false                                          # DOESN'T WORK (YET?)
+SpaceBeforeCaseColon: false
 SpaceBeforeCpp11BracedList: false
 SpaceBeforeCtorInitializerColon: false
 SpaceBeforeInheritanceColon: false
@@ -155,13 +162,18 @@ SpacesInAngles: false
 SpacesInCStyleCastParentheses: false
 SpacesInConditionalStatement: false
 SpacesInContainerLiterals: false
-#SpacesInLineCommentPrefix: 1                                         # DOESN'T WORK (YET?)
+SpacesInLineCommentPrefix:
+  Minimum: 1
+  Maximum: 1
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
 #A vector of macros that should be interpreted as complete statements.
 #StatementMacros:
 TabWidth: 4
 # A vector of macros that should be interpreted as type declarations instead of as function calls.
-#TypenameMacros: ['STACK_OF', 'LIST']
+TypenameMacros:
+  - 'STACK_OF'
+  - 'LIST'
 UseTab: Never
+WhitespaceSensitiveMacros: [ '' ]
 ...

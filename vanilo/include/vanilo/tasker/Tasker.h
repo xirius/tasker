@@ -879,7 +879,7 @@ namespace vanilo::tasker {
         auto last = invocable.get();
 
         _last->setNext(std::move(invocable));
-        return Task::Builder<typename decltype(invocable)::element_type, Signature, Arg>{std::move(_task), _last, last};
+        return Task::Builder<typename decltype(invocable)::element_type, TaskFunc, Arg>{std::move(_task), _last, last};
     }
 
     template <typename Invocable, typename Signature, typename Arg>

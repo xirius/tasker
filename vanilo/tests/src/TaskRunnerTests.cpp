@@ -256,3 +256,19 @@ SCENARIO("Task::run #3 Result<void> -> Result<Arg>", "[task runner]")
         }
     }
 }
+
+TEST_CASE("Run task: Chaining tasks", "[task]")
+{
+    auto executor = LocalThreadExecutor::create();
+    int result{0};
+
+    Task::run(executor.get(), []() {
+        return 123;
+    }).then(executor.get(), [&result](int x) {
+          result = x;
+      }).then(executor.get(), [&result]() { result = result * 2; });
+
+    executor->process(3);
+
+    REQUIRE(result == 123 * 2);
+}
