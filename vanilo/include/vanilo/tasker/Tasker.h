@@ -36,7 +36,7 @@ namespace vanilo::tasker {
         virtual ~Task() = default;
 
         virtual void cancel() noexcept = 0;
-        virtual void run()             = 0;
+        virtual void run() = 0;
     };
 
     /// TaskExecutor interface
@@ -115,10 +115,23 @@ namespace vanilo::tasker {
         virtual std::future<void> resize(size_t numThreads) = 0;
 
         /**
+         * Checks if the thread pool contains a thread with the specified id.
+         * @param threadId The id of the thread to check.
+         * @return True if the thead pool contains a thread with the specified id; false otherwise.
+         */
+        [[nodiscard]] virtual bool containsThread(std::thread::id threadId) const = 0;
+
+        /**
          * Returns the number of threads in the executor thread pool.
          * @return The number of threads in the thread pool.
          */
         [[nodiscard]] virtual size_t threadCount() const noexcept = 0;
+
+        /**
+         * Returns the list of the thread ids.
+         * @return The list of the thread ids.
+         */
+        [[nodiscard]] virtual std::vector<std::thread::id> threadIds() const = 0;
     };
 
     namespace internal {
@@ -158,8 +171,8 @@ namespace vanilo::tasker {
 
       public:
         using ResultType = typename core::traits::FunctionTraits<Signature>::ReturnType;
-        using FirstArg   = typename core::traits::FunctionTraits<Signature>::template Arg<0>;
-        using PureArgs   = typename core::traits::FunctionTraits<Signature>::PureArgsType;
+        using FirstArg = typename core::traits::FunctionTraits<Signature>::template Arg<0>;
+        using PureArgs = typename core::traits::FunctionTraits<Signature>::PureArgsType;
 
         template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, Arg>>
         auto then(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
@@ -396,34 +409,34 @@ namespace vanilo::tasker {
                 _errorMetadata = std::make_any<std::tuple<Functor, std::tuple<Args...>>>(
                     std::make_tuple(std::forward<Functor>(functor), std::forward_as_tuple(std::forward<Args>(args)...)));
 
-                _errorHandler = [](TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata,
-                                   std::exception_ptr& exPtr) {
+                _errorHandler =
+                    [](TaskExecutor* executor, CancellationToken& token, Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
                     auto exceptionTask = core::binder::bind(
                         [](CancellationToken& token, Callable& task, std::any& metadata, std::exception_ptr& exPtr) {
-                            auto [func, args] = std::move(std::any_cast<std::tuple<Functor, std::tuple<Args...>>>(metadata));
+                        auto [func, args1] = std::move(std::any_cast<std::tuple<Functor, std::tuple<Args...>>>(metadata));
 
+                        try {
                             try {
-                                try {
-                                    std::rethrow_exception(exPtr);
-                                }
-                                catch (std::exception& ex) {
-                                    using TokenArg = typename std::decay_t<typename core::traits::FunctionTraits<Functor>::template Arg<1>>;
-                                    constexpr bool HasToken = std::is_same_v<TokenArg, CancellationToken>;
-
-                                    // Pack exception and optional cancellation token
-                                    auto args2 = std::tuple<std::reference_wrapper<std::exception>, CancellationToken>(
-                                        std::ref(ex), std::move(token));
-
-                                    rebindAndInvokeCallable(
-                                        task, std::forward<Functor>(func), args,
-                                        std::make_index_sequence<std::tuple_size_v<decltype(args)>>{}, args2,
-                                        std::make_index_sequence<1 + HasToken>{});
-                                }
+                                std::rethrow_exception(exPtr);
                             }
-                            catch (...) {
-                                /// Log the error coming form the exception handler callback
-                                TRACE("An unexpected exception occurred during execution of onException callback!");
+                            catch (std::exception& ex) {
+                                using TokenArg = typename std::decay_t<typename core::traits::FunctionTraits<Functor>::template Arg<1>>;
+                                constexpr bool HasToken = std::is_same_v<TokenArg, CancellationToken>;
+
+                                // Pack exception and optional cancellation token
+                                auto args2 =
+                                    std::tuple<std::reference_wrapper<std::exception>, CancellationToken>(std::ref(ex), std::move(token));
+
+                                rebindAndInvokeCallable(
+                                    task, std::forward<Functor>(func), args1,
+                                    std::make_index_sequence<std::tuple_size_v<decltype(args1)>>{}, args2,
+                                    std::make_index_sequence<1 + HasToken>{});
                             }
+                        }
+                        catch (...) {
+                            /// Log the error coming form the exception handler callback
+                            TRACE("An unexpected exception occurred during execution of onException callback!");
+                        }
                         },
                         std::move(token), std::move(task), std::move(metadata), exPtr);
 
@@ -461,7 +474,7 @@ namespace vanilo::tasker {
                 }
 
                 if (!_errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr)) {
-                    // Exception was not handled by the task so it is rethrown
+                    // Exception was not handled by the task, so it is rethrown
                     std::rethrow_exception(exPtr);
                 }
             }
@@ -503,10 +516,10 @@ namespace vanilo::tasker {
                 std::index_sequence<Indexes2...>)
             {
                 using BoundedTokenArg = typename std::decay_t<typename std::decay_t<decltype(task)>::template Element<0>>;
-                using ProvidedArgs    = typename core::traits::FunctionTraits<Functor>::PureArgsType;
+                using ProvidedArgs = typename core::traits::FunctionTraits<Functor>::PureArgsType;
 
                 constexpr bool HasBoundedToken = std::is_same_v<BoundedTokenArg, CancellationToken>;
-                constexpr auto SelectedArgNum  = ArityChecker<void, ProvidedArgs>::ProvidedArity;
+                constexpr auto SelectedArgNum = ArityChecker<void, ProvidedArgs>::ProvidedArity;
 
                 task.template rebindSelectedPrepend<HasBoundedToken, SelectedArgNum>(
                     std::forward<Functor>(func), std::move(std::get<Indexes1>(args1))..., std::move(std::get<Indexes2>(args2))...)();
@@ -806,7 +819,7 @@ namespace vanilo::tasker {
             template <typename TaskFunc, typename... Args>
             static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
             {
-                auto task      = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+                auto task = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Args>(args)...);
                 auto invocable = std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
                 invocable->setToken(std::move(token));
                 return std::move(invocable);
@@ -819,7 +832,7 @@ namespace vanilo::tasker {
             template <typename TaskFunc, typename... Args>
             static auto createInvocable(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args)
             {
-                auto task      = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
+                auto task = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
                 auto invocable = std::make_unique<internal::Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
                 invocable->setToken(std::move(token));
                 return std::move(invocable);
@@ -885,12 +898,12 @@ namespace vanilo::tasker {
     template <typename Invocable, typename Signature, typename Arg>
     auto Task::Builder<Invocable, Signature, Arg, true>::getFuture() -> std::future<Return>
     {
-        auto task     = static_cast<Invocable*>(this->_task->getLastTask());
+        auto task = static_cast<Invocable*>(this->_task->getLastTask());
         auto promised = task->toPromisedTask();
-        auto future   = promised->getFuture();
+        auto future = promised->getFuture();
 
         if (this->_current == this->_last) {
-            this->_task    = std::move(promised);
+            this->_task = std::move(promised);
             this->_current = this->_last = this->_task.get();
         }
         else {

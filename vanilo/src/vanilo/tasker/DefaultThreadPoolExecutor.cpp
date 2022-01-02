@@ -65,6 +65,11 @@ DefaultThreadPoolExecutor::~DefaultThreadPoolExecutor()
     invalidate();
 }
 
+bool DefaultThreadPoolExecutor::containsThread(std::thread::id threadId) const
+{
+    return _threads.contains([&threadId](const std::thread& thread) -> bool { return thread.get_id() == threadId; });
+}
+
 size_t DefaultThreadPoolExecutor::count() const
 {
     return _queue.size();
@@ -73,6 +78,12 @@ size_t DefaultThreadPoolExecutor::count() const
 size_t DefaultThreadPoolExecutor::threadCount() const noexcept
 {
     return _threads.size();
+}
+
+std::vector<std::thread::id> DefaultThreadPoolExecutor::threadIds() const
+{
+    std::function<std::thread::id(const std::thread&)> selector = [](auto& thread) { return thread.get_id(); };
+    return _threads.toList(selector);
 }
 
 std::future<void> DefaultThreadPoolExecutor::resize(size_t numThreads)
