@@ -4,8 +4,8 @@
 #include <vanilo/concurrent/CancellationToken.h>
 
 #include <condition_variable>
+#include <deque>
 #include <mutex>
-#include <queue>
 
 namespace vanilo::concurrent {
 
@@ -24,6 +24,17 @@ namespace vanilo::concurrent {
             if (_valid) {
                 invalidate();
             }
+        }
+
+        /**
+         * Checks for the existence of the value in the queue.
+         * @param predicate The predicate to check for the existence.
+         * @return True if the element was found; false otherwise.
+         */
+        bool contains(const std::function<bool(const T&)>& predicate) const
+        {
+            std::lock_guard<std::mutex> lock{_mutex};
+            return std::any_of(_queue.begin(), _queue.end(), predicate);
         }
 
         /**
@@ -59,7 +70,7 @@ namespace vanilo::concurrent {
         void enqueue(T&& value)
         {
             std::lock_guard<std::mutex> lock{_mutex};
-            _queue.push(std::move(value));
+            _queue.push_back(std::move(value));
             _condition.notify_one();
         }
 
@@ -77,7 +88,7 @@ namespace vanilo::concurrent {
             }
 
             out = std::move(_queue.front());
-            _queue.pop();
+            _queue.pop_front();
 
             return true;
         }
@@ -92,7 +103,7 @@ namespace vanilo::concurrent {
         {
             std::unique_lock<std::mutex> lock{_mutex};
 
-            // Using the condition in the predicate ensures that spurious wake ups with a valid
+            // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
             _condition.wait(lock, [this]() { return !_queue.empty() || !_valid; });
 
@@ -101,7 +112,7 @@ namespace vanilo::concurrent {
             }
 
             out = std::move(_queue.front());
-            _queue.pop();
+            _queue.pop_front();
 
             return true;
         }
@@ -116,7 +127,7 @@ namespace vanilo::concurrent {
          */
         bool waitDequeue(CancellationToken& token, T& out)
         {
-            bool canceled     = false;
+            bool canceled = false;
             auto subscription = token.subscribe([this, &canceled]() {
                 std::unique_lock<std::mutex> lock{_mutex};
                 canceled = true;
@@ -124,7 +135,7 @@ namespace vanilo::concurrent {
             });
 
             std::unique_lock<std::mutex> lock{_mutex};
-            // Using the condition in the predicate ensures that spurious wake ups with a valid
+            // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
             _condition.wait(lock, [this, &token, &canceled]() { return !_queue.empty() || canceled || !_valid; });
 
@@ -133,7 +144,7 @@ namespace vanilo::concurrent {
             }
 
             out = std::move(_queue.front());
-            _queue.pop();
+            _queue.pop_front();
 
             return true;
         }
@@ -156,7 +167,7 @@ namespace vanilo::concurrent {
             std::lock_guard<std::mutex> lock{_mutex};
 
             while (!_queue.empty()) {
-                _queue.pop();
+                _queue.pop_front();
             }
 
             _condition.notify_all();
@@ -185,7 +196,7 @@ namespace vanilo::concurrent {
 
             while (!_queue.empty()) {
                 remaining.push_back(std::move(_queue.front()));
-                _queue.pop();
+                _queue.pop_front();
             }
 
             _valid = false;
@@ -202,11 +213,26 @@ namespace vanilo::concurrent {
             return _valid.load();
         }
 
+        /**
+         * Returns the list of the transformed items of the queue.
+         * @tparam TOut The type of the list elements
+         * @param selector The transformation function on the queue elements.
+         * @return The list of the transformed items of the queue.
+         */
+        template <typename TOut>
+        std::vector<TOut> toList(const std::function<TOut(const T&)>& selector) const
+        {
+            std::lock_guard<std::mutex> lock{_mutex};
+            std::vector<TOut> list;
+            std::for_each(_queue.begin(), _queue.end(), [&list, &selector](auto& item) { list.emplace_back(selector(item)); });
+            return list;
+        }
+
       private:
         std::atomic_bool _valid{true};
         std::condition_variable _condition;
         mutable std::mutex _mutex;
-        std::queue<T> _queue;
+        std::deque<T> _queue;
     };
 
 } // namespace vanilo::concurrent

@@ -1,5 +1,5 @@
-#include <vanilo/tasker/Tasker.h>
 #include <vanilo/core/Tracer.h>
+#include <vanilo/tasker/Tasker.h>
 
 using namespace vanilo::tasker;
 

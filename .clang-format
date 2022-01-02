@@ -4,8 +4,9 @@ Standard: Latest
 
 AccessModifierOffset: -2
 AlignAfterOpenBracket: AlwaysBreak
-AlignConsecutiveAssignments: Consecutive
-AlignConsecutiveBitFields: Consecutive
+AlignArrayOfStructures: Right
+AlignConsecutiveAssignments: None
+AlignConsecutiveBitFields: None
 AlignConsecutiveDeclarations: None
 AlignConsecutiveMacros: Consecutive
 AlignEscapedNewlines: Left
@@ -70,14 +71,19 @@ Cpp11BracedListStyle: true
 DeriveLineEnding: true
 DerivePointerAlignment: false
 DisableFormat: false
+EmptyLineAfterAccessModifier: Never
 EmptyLineBeforeAccessModifier: LogicalBlock
 ExperimentalAutoDetectBinPacking: false
 FixNamespaceComments: true
 
 ForEachMacros:
-  - foreach
-  - Q_FOREACH
+  - RANGES_FOR
+  - FOREACH
   - BOOST_FOREACH
+  - Q_FOREACH
+
+IfMacros:
+  - IF
 
 IncludeBlocks: Regroup
 IncludeCategories:
@@ -93,7 +99,7 @@ IncludeCategories:
 IncludeIsMainRegex: '(Test)?$'
 #IncludeIsMainSourceRegex:
 
-#IndentAccessModifiers: true                                           # DOESN'T WORK (YET?)
+IndentAccessModifiers: false
 IndentCaseBlocks: false
 IndentCaseLabels: true
 IndentExternBlock: Indent
@@ -107,11 +113,17 @@ JavaScriptQuotes: Leave
 JavaScriptWrapImports: true
 
 KeepEmptyLinesAtTheStartOfBlocks: false
+LambdaBodyIndentation: OuterScope
 MacroBlockBegin: ''
 MacroBlockEnd: ''
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: All
 
+NamespaceMacros:
+  - NAMESPACE
+
+PPIndentWidth: -1
+PackConstructorInitializers: BinPack
 #PenaltyBreakAssignment:
 #PenaltyBreakBeforeFirstCallParameter:
 #PenaltyBreakComment:
@@ -123,6 +135,15 @@ NamespaceIndentation: All
 #PenaltyReturnTypeOnItsOwnLine:
 
 PointerAlignment: Left
+QualifierAlignment: Leave
+#QualifierOrder:                                                                  # DOESN'T WORK (YET?)
+#  - inline
+#  - restrict
+#  - static
+#  - volatile
+#  - constexpr
+#  - const
+#  - type
 
 RawStringFormats:
   - Language: TextProto
@@ -139,8 +160,9 @@ RawStringFormats:
     BasedOnStyle: llvm
     CanonicalDelimiter: 'cc'
 
+ReferenceAlignment: Left
 ReflowComments: true
-#ShortNamespaceLines: 1                                               # DOESN'T WORK (YET?)
+ShortNamespaceLines: 10
 SortIncludes: CaseSensitive
 SortUsingDeclarations: true
 SpaceAfterCStyleCast: false
@@ -153,6 +175,7 @@ SpaceBeforeCpp11BracedList: false
 SpaceBeforeCtorInitializerColon: false
 SpaceBeforeInheritanceColon: false
 SpaceBeforeParens: ControlStatements
+#SpaceBeforeParensOptions:                                                      # DOESN'T WORK (YET?)
 SpaceBeforeRangeBasedForLoopColon: true
 SpaceBeforeSquareBrackets: false
 SpaceInEmptyBlock: false
@@ -167,6 +190,10 @@ SpacesInLineCommentPrefix:
   Maximum: 1
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
+
+StatementAttributeLikeMacros:
+  - emit
+
 #A vector of macros that should be interpreted as complete statements.
 #StatementMacros:
 TabWidth: 4
