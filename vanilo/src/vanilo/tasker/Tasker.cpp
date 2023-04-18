@@ -5,7 +5,7 @@
 using namespace vanilo::tasker;
 
 /// LocalThreadExecutor
-/// ============================================================================
+/// ================================================================================================
 
 std::unique_ptr<LocalThreadExecutor> LocalThreadExecutor::create()
 {
@@ -13,7 +13,7 @@ std::unique_ptr<LocalThreadExecutor> LocalThreadExecutor::create()
 }
 
 /// ThreadPoolExecutor
-/// ============================================================================================
+/// ================================================================================================
 
 size_t ThreadPoolExecutor::DefaultThreadNumber = !std::thread::hardware_concurrency() ? 1 : std::thread::hardware_concurrency();
 

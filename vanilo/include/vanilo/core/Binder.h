@@ -4,6 +4,8 @@
 #include <vanilo/core/Traits.h>
 #include <vanilo/core/Utility.h>
 
+#include <cstddef>
+
 namespace vanilo::core::binder {
     namespace internal {
 
@@ -38,7 +40,7 @@ namespace vanilo::core::binder {
         struct BindHelper: public ArityChecker<typename std::decay_t<Func>, Args...>
         {
             using FuncType = typename std::decay_t<Func>;
-            using Type     = internal::Bind<FuncType(typename std::decay_t<Args>...)>;
+            using Type = internal::Bind<FuncType(typename std::decay_t<Args>...)>;
         };
 
         template <typename Functor, typename... BoundArgs>
@@ -58,7 +60,7 @@ namespace vanilo::core::binder {
             template <std::size_t N>
             using Element = typename traits::internal::Arguments<BoundArgs...>::template Element<N>::Type;
 
-            Bind(const Bind& other)     = default;
+            Bind(const Bind& other) = default;
             Bind(Bind&& other) noexcept = default;
 
             template <typename... Args>
@@ -80,11 +82,11 @@ namespace vanilo::core::binder {
             template <size_t Offset, size_t Selected, typename Func, typename... Args>
             auto rebindSelectedPrepend(Func&& func, Args&&... args)
             {
-                constexpr auto IsMember    = traits::FunctionTraits<Functor>::IsMemberFnPtr;
-                constexpr auto ArgsCount   = sizeof...(BoundArgs) - IsMember;
+                constexpr auto IsMember = traits::FunctionTraits<Functor>::IsMemberFnPtr;
+                constexpr auto ArgsCount = sizeof...(BoundArgs) - IsMember;
                 constexpr auto TotalOffset = Offset + IsMember;
-                using NewIndices           = std::make_index_sequence<Selected>;
-                using SelectedIndices      = typename OffsetSequence<TotalOffset, std::make_index_sequence<Selected>>::Type;
+                using NewIndices = std::make_index_sequence<Selected>;
+                using SelectedIndices = typename OffsetSequence<TotalOffset, std::make_index_sequence<Selected>>::Type;
 
                 static_assert(Offset + Selected <= ArgsCount, "Out of range: More arguments selected that is bound to the object");
 
