@@ -26,7 +26,7 @@ size_t DefaultLocalThreadExecutor::count() const
     return _queue.size();
 }
 
-size_t DefaultLocalThreadExecutor::process(size_t maxCount)
+size_t DefaultLocalThreadExecutor::process(const size_t maxCount)
 {
     if (maxCount == 0) {
         return _queue.size();

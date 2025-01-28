@@ -3,16 +3,16 @@
 
 #include <vanilo/concurrent/CancellationToken.h>
 
+#include <algorithm>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
 
 namespace vanilo::concurrent {
-
     template <typename T>
     class ConcurrentQueue
     {
-      public:
+    public:
         ConcurrentQueue() = default;
 
         ConcurrentQueue(const ConcurrentQueue<T>& other) = delete;
@@ -33,7 +33,7 @@ namespace vanilo::concurrent {
          */
         bool contains(const std::function<bool(const T&)>& predicate) const
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             return std::any_of(_queue.begin(), _queue.end(), predicate);
         }
 
@@ -46,7 +46,7 @@ namespace vanilo::concurrent {
         template <typename... Args>
         auto enqueue(Args&&... args)
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             auto result = _queue.emplace(std::forward<Args>(args)...);
             _condition.notify_one();
             return result;
@@ -58,7 +58,7 @@ namespace vanilo::concurrent {
          */
         void enqueue(const T& value)
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             _queue.push(value);
             _condition.notify_one();
         }
@@ -69,19 +69,19 @@ namespace vanilo::concurrent {
          */
         void enqueue(T&& value)
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             _queue.push_back(std::move(value));
             _condition.notify_one();
         }
 
         /**
-         * Attempts to retrieve the first element from the queue (non blocking). The element is removed from the queue.
+         * Attempts to retrieve the first element from the queue (non-blocking). The element is removed from the queue.
          * @param out The retrieved element from the queue.
          * @return True if an element was successfully written to the out parameter, false otherwise.
          */
         bool tryDequeue(T& out)
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
 
             if (_queue.empty() || !_valid) {
                 return false;
@@ -101,11 +101,14 @@ namespace vanilo::concurrent {
          */
         bool waitDequeue(T& out)
         {
-            std::unique_lock<std::mutex> lock{_mutex};
+            std::unique_lock lock{_mutex};
 
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this]() { return !_queue.empty() || !_valid; });
+            _condition.wait(
+                lock, [this]() {
+                    return !_queue.empty() || !_valid;
+                });
 
             if (!_valid) {
                 return false;
@@ -128,16 +131,20 @@ namespace vanilo::concurrent {
         bool waitDequeue(CancellationToken& token, T& out)
         {
             bool canceled = false;
-            auto subscription = token.subscribe([this, &canceled]() {
-                std::unique_lock<std::mutex> lock{_mutex};
-                canceled = true;
-                _condition.notify_all();
-            });
+            auto subscription = token.subscribe(
+                [this, &canceled]() {
+                    std::unique_lock lock{_mutex};
+                    canceled = true;
+                    _condition.notify_all();
+                });
 
-            std::unique_lock<std::mutex> lock{_mutex};
+            std::unique_lock lock{_mutex};
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this, &token, &canceled]() { return !_queue.empty() || canceled || !_valid; });
+            _condition.wait(
+                lock, [this, &token, &canceled]() {
+                    return !_queue.empty() || canceled || !_valid;
+                });
 
             if (token.isCancellationRequested() || !_valid) {
                 return false;
@@ -155,7 +162,7 @@ namespace vanilo::concurrent {
          */
         bool empty() const
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             return _queue.empty();
         }
 
@@ -164,7 +171,7 @@ namespace vanilo::concurrent {
          */
         void clear()
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
 
             while (!_queue.empty()) {
                 _queue.pop_front();
@@ -179,7 +186,7 @@ namespace vanilo::concurrent {
          */
         size_t size() const
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             return _queue.size();
         }
 
@@ -191,7 +198,7 @@ namespace vanilo::concurrent {
          */
         std::vector<T> invalidate()
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             std::vector<T> remaining;
 
             while (!_queue.empty()) {
@@ -205,7 +212,7 @@ namespace vanilo::concurrent {
         }
 
         /**
-         * Returns whether or not the queue is valid.
+         * Returns whether the queue is valid.
          * @return True if the queue is valid, false otherwise.
          */
         bool isValid() const
@@ -222,19 +229,21 @@ namespace vanilo::concurrent {
         template <typename TOut>
         std::vector<TOut> toList(const std::function<TOut(const T&)>& selector) const
         {
-            std::lock_guard<std::mutex> lock{_mutex};
+            std::lock_guard lock{_mutex};
             std::vector<TOut> list;
-            std::for_each(_queue.begin(), _queue.end(), [&list, &selector](auto& item) { list.emplace_back(selector(item)); });
+            std::for_each(
+                _queue.begin(), _queue.end(), [&list, &selector](auto& item) {
+                    list.emplace_back(selector(item));
+                });
             return list;
         }
 
-      private:
+    private:
         std::atomic_bool _valid{true};
         std::condition_variable _condition;
         mutable std::mutex _mutex;
         std::deque<T> _queue;
     };
-
 } // namespace vanilo::concurrent
 
 #endif // INC_D8C0265AC7204A5F8B06B620B9F01B70
