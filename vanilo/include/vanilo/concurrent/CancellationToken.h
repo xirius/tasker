@@ -1,16 +1,14 @@
 #pragma once
 #include <vanilo/Export.h>
 
-#include <atomic>
 #include <functional>
 #include <memory>
 
 namespace vanilo::concurrent {
-
     /**
-     * This exception occur when you're waiting for a result, then a cancellation is notified.
+     * This exception occurs when you're waiting for a result, then a cancellation is notified.
      */
-    class CanceledException final: public std::exception
+    class VANILO_EXPORT OperationCanceledException final: public std::exception
     {
       public:
         [[nodiscard]] const char* what() const noexcept override
@@ -31,13 +29,13 @@ namespace vanilo::concurrent {
 
         CancellationToken();
 
-        bool operator==(const CancellationToken& other) const noexcept;
-        bool operator!=(const CancellationToken& other) const noexcept;
+        friend bool operator==(const CancellationToken& lhs, const CancellationToken& rhs) noexcept;
+        friend bool operator!=(const CancellationToken& lhs, const CancellationToken& rhs) noexcept;
 
         /**
          * Communicates a request for cancellation.
          */
-        void cancel();
+        void cancel() const;
 
         /**
          * Gets whether cancellation has been requested.
@@ -47,15 +45,15 @@ namespace vanilo::concurrent {
 
         /**
          * Registers a delegate that will be called when this CancellationToken is canceled.
-         * @param callback The The callback to be executed when the CancellationToken is canceled.
+         * @param callback The callback to be executed when the CancellationToken is canceled.
          * @return The subscription instance that can be used to unregister the callback.
          */
-        Subscription subscribe(std::function<void()> callback);
+        Subscription subscribe(std::function<void()> callback) const;
 
         /**
          * Throws a CanceledException if this token has had cancellation requested.
          */
-        void throwIfCancellationRequested();
+        void throwIfCancellationRequested() const;
 
       private:
         struct Impl;

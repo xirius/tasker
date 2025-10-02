@@ -15,7 +15,7 @@ class StopThreadException final: public std::exception
     }
 };
 
-class StopThreadTask: public Task
+class StopThreadTask final: public Task
 {
   public:
     explicit StopThreadTask(
@@ -88,7 +88,7 @@ std::vector<std::thread::id> DefaultThreadPoolExecutor::threadIds() const
 
 std::future<void> DefaultThreadPoolExecutor::resize(size_t numThreads)
 {
-    std::lock_guard<std::mutex> _lock{_mutex};
+    std::lock_guard _lock{_mutex};
     auto promise = std::make_shared<std::promise<void>>();
 
     if (_threads.size() < numThreads) {
@@ -137,9 +137,9 @@ void DefaultThreadPoolExecutor::init(size_t numThreads)
 
 void DefaultThreadPoolExecutor::invalidate()
 {
-    auto tasks = _queue.invalidate();
+    const auto tasks = _queue.invalidate();
 
-    for (auto& task : tasks) {
+    for (const auto& task : tasks) {
         task->cancel();
         task->run();
     }
@@ -154,9 +154,9 @@ void DefaultThreadPoolExecutor::invalidate()
 
 void DefaultThreadPoolExecutor::worker()
 {
-    std::unique_ptr<Task> task;
-
     try {
+        std::unique_ptr<Task> task;
+
         while (true) {
             if (!_queue.waitDequeue(task)) {
                 return;
@@ -177,6 +177,6 @@ void DefaultThreadPoolExecutor::worker()
         }
     }
     catch (const StopThreadException&) {
-        return; // Gracefully stop the thread execution
+        // Gracefully stop the thread execution
     }
 }

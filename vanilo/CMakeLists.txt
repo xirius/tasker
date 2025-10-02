@@ -97,5 +97,5 @@ if(BUILD_UNIT_TESTS)
     set_target_properties(${TARGET_UT_NAME} PROPERTIES LINK_FLAGS "-Wl,-rpath,./ -Wl,-rpath,../${LIBRARY_FOLDER}")
 
     # Add Catch2 framework
-    target_link_libraries(${TARGET_UT_NAME} PRIVATE Catch2::Catch2)
+    target_link_libraries(${TARGET_UT_NAME} PRIVATE Catch2::Catch2WithMain)
 endif()

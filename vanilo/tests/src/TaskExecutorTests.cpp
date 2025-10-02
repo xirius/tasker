@@ -1,6 +1,6 @@
 #include <vanilo/tasker/Tasker.h>
 
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 using namespace vanilo::concurrent;
 using namespace vanilo::tasker;
@@ -29,7 +29,9 @@ SCENARIO("Test the flow of the LocalThreadExecutor", "[local executor]")
 {
     GIVEN("An initial executor")
     {
-        int value1{0}, value2{0}, value3{0};
+        int value1{0};
+        int value2{0};
+        int value3{0};
         auto task1 = std::make_unique<CustomTask>(value1);
         auto task2 = std::make_unique<CustomTask>(value2);
         auto task3 = std::make_unique<CustomTask>(value3);
@@ -140,7 +142,7 @@ SCENARIO("Test cancellation of tasks when ThreadPoolExecutor is released", "[poo
 {
     GIVEN("An initial executor with 0 threads")
     {
-        auto executor    = ThreadPoolExecutor::create(0);
+        auto executor = ThreadPoolExecutor::create(0);
         bool isCancelled = false;
         bool nonExecuted = true;
 
@@ -149,7 +151,7 @@ SCENARIO("Test cancellation of tasks when ThreadPoolExecutor is released", "[poo
             Task::run(executor.get(), [&nonExecuted]() {
                 nonExecuted = false;
             }).onException(executor.get(), [&isCancelled](std::exception& ex, CancellationToken& token) {
-                isCancelled = token.isCancellationRequested() && dynamic_cast<CanceledException*>(&ex) != nullptr;
+                isCancelled = token.isCancellationRequested() && dynamic_cast<OperationCanceledException*>(&ex) != nullptr;
             });
 
             executor.reset();

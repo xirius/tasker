@@ -5,7 +5,7 @@ using namespace vanilo::tasker;
 /// Helper methods
 /// ================================================================================================
 
-inline void executeTask(std::unique_ptr<Task>& task)
+inline void executeTask(const std::unique_ptr<Task>& task)
 {
     try {
         task->run();

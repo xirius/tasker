@@ -4,6 +4,7 @@
 #include <vanilo/concurrent/CancellationToken.h>
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -12,12 +13,12 @@ namespace vanilo::concurrent {
     template <typename T>
     class ConcurrentQueue
     {
-    public:
+      public:
         ConcurrentQueue() = default;
 
-        ConcurrentQueue(const ConcurrentQueue<T>& other) = delete;
+        ConcurrentQueue(const ConcurrentQueue& other) = delete;
 
-        ConcurrentQueue(ConcurrentQueue<T>&& other) noexcept = delete;
+        ConcurrentQueue(ConcurrentQueue&& other) noexcept = delete;
 
         ~ConcurrentQueue()
         {
@@ -105,10 +106,7 @@ namespace vanilo::concurrent {
 
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(
-                lock, [this]() {
-                    return !_queue.empty() || !_valid;
-                });
+            _condition.wait(lock, [this] { return !_queue.empty() || !_valid; });
 
             if (!_valid) {
                 return false;
@@ -131,20 +129,16 @@ namespace vanilo::concurrent {
         bool waitDequeue(CancellationToken& token, T& out)
         {
             bool canceled = false;
-            auto subscription = token.subscribe(
-                [this, &canceled]() {
-                    std::unique_lock lock{_mutex};
-                    canceled = true;
-                    _condition.notify_all();
-                });
+            auto subscription = token.subscribe([this, &canceled] {
+                std::unique_lock lock{_mutex};
+                canceled = true;
+                _condition.notify_all();
+            });
 
             std::unique_lock lock{_mutex};
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(
-                lock, [this, &token, &canceled]() {
-                    return !_queue.empty() || canceled || !_valid;
-                });
+            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || !_valid; });
 
             if (token.isCancellationRequested() || !_valid) {
                 return false;
@@ -231,14 +225,11 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
             std::vector<TOut> list;
-            std::for_each(
-                _queue.begin(), _queue.end(), [&list, &selector](auto& item) {
-                    list.emplace_back(selector(item));
-                });
+            std::for_each(_queue.begin(), _queue.end(), [&list, &selector](auto& item) { list.emplace_back(selector(item)); });
             return list;
         }
 
-    private:
+      private:
         std::atomic_bool _valid{true};
         std::condition_variable _condition;
         mutable std::mutex _mutex;
