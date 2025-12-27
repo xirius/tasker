@@ -16,28 +16,58 @@ struct CancellationToken::Subscription::Impl
     {
     }
 
-    void unsubscribe()
+    void unsubscribe() noexcept
     {
+        std::lock_guard lock{mutex};
         _callback = nullptr;
     }
 
-    void notify() const
+    void notify() noexcept
     {
-        if (_callback) {
-            try {
-                _callback();
-            }
-            catch (const std::exception& ex) {
-                TRACE("An unhandled exception occurred during cancellation notification. Message: %s", ex.what());
-            }
-            catch (...) {
-                TRACE("An unhandled exception occurred during cancellation notification!");
-            }
+        std::function<void()> callback;
+        {
+            std::lock_guard lock{mutex};
+            callback = std::move(_callback); // move under lock => no data race and future calls are no-op
+        }
+
+        if (!callback) {
+            return;
+        }
+
+        try {
+            callback();
+        }
+        catch (const std::exception& ex) {
+            TRACE("An unhandled exception occurred during cancellation notification. Message: %s", ex.what());
+        }
+        catch (...) {
+            TRACE("An unhandled exception occurred during cancellation notification!");
         }
     }
 
     std::function<void()> _callback;
+    std::mutex mutex{};
 };
+
+/// Subscription
+/// ========================================================================
+
+CancellationToken::Subscription::Subscription(std::shared_ptr<Impl> impl) noexcept: _impl{std::move(impl)}
+{
+}
+
+CancellationToken::Subscription::~Subscription()
+{
+    unsubscribe();
+}
+
+void CancellationToken::Subscription::unsubscribe() noexcept
+{
+    if (_impl) {
+        _impl->unsubscribe();
+        _impl.reset();
+    }
+}
 
 /// CancellationToken::Impl
 /// ========================================================================
@@ -46,41 +76,50 @@ struct CancellationToken::Impl
 {
     void cancel()
     {
-        std::vector<std::weak_ptr<Subscription::Impl>> snapshot;
+        // One-shot cancellation
+        if (canceled.exchange(true, std::memory_order_release)) {
+            return; // already canceled
+        }
 
+        // Snapshot under lock to avoid vector races
+        std::vector<std::shared_ptr<Subscription::Impl>> snapshot;
         {
-            // Mutually exclusive with subscribe method
             std::lock_guard lock{mutex};
-            if (canceled.exchange(true, std::memory_order_release)) {
-                return; // already canceled
-            }
+            snapshot.reserve(subscriptions.size());
 
-            snapshot = subscriptions; // copy
+            for (auto& subscription : subscriptions) {
+                if (auto callback = subscription.lock()) {
+                    snapshot.push_back(callback);
+                }
+            }
         }
 
-        // Callbacks have to be called without acquired mutex
+        // Notify without holding the subscriptions mutex
         for (const auto& subscription : snapshot) {
-            if (const auto callback = subscription.lock()) {
-                callback->notify();
-            }
+            subscription->notify();
         }
+    }
+
+    [[nodiscard]] bool isCanceled() const noexcept
+    {
+        return canceled.load(std::memory_order_acquire);
     }
 
     /**
      * Registers the callback which is called when the cancellation has been requested.
      * @return False if the cancellation has been requested and the registration cannot be done, true otherwise.
      */
-    bool subscribe(std::weak_ptr<Subscription::Impl> subscription)
+    bool addSubscription(std::weak_ptr<Subscription::Impl> subscription)
     {
         // No additional subscription can be made if the cancellation has been requested
         std::lock_guard lock{mutex};
-        const size_t collectionSize = subscriptions.size();
 
         if (canceled.load(std::memory_order_acquire)) {
             return false;
         }
 
         // Try to reuse freed slots
+        const size_t collectionSize = subscriptions.size();
         for (size_t i = 0; i < collectionSize; i++) {
             auto& item = subscriptions[i];
 
@@ -106,69 +145,77 @@ struct CancellationToken::Impl
 
 namespace vanilo::concurrent {
 
-    bool operator==(const CancellationToken& lhs, const CancellationToken& rhs) noexcept
+    bool operator==(const CancellationToken& a, const CancellationToken& b) noexcept
     {
-        return lhs._impl == rhs._impl;
+        return a._impl == b._impl;
     }
 
-    bool operator!=(const CancellationToken& lhs, const CancellationToken& rhs) noexcept
+    bool operator!=(const CancellationToken& a, const CancellationToken& b) noexcept
     {
-        return !(lhs == rhs);
+        return !(a == b);
     }
 
+}
+
+CancellationToken::CancellationToken(std::shared_ptr<Impl> impl) noexcept: _impl(std::move(impl))
+{
 }
 
 CancellationToken CancellationToken::none()
 {
-    static CancellationToken token;
-    return token;
-}
-
-CancellationToken::CancellationToken(): _impl{std::make_shared<Impl>()}
-{
-}
-
-void CancellationToken::cancel() const
-{
-    _impl->cancel();
+    return CancellationToken{};
 }
 
 bool CancellationToken::isCancellationRequested() const noexcept
 {
-    return _impl->canceled.load(std::memory_order_acquire);
+    // none() token => never canceled
+    return _impl ? _impl->isCanceled() : false;
 }
 
 CancellationToken::Subscription CancellationToken::subscribe(std::function<void()> callback) const
 {
-    Subscription subscription;
-    subscription._impl = std::make_shared<Subscription::Impl>(std::move(callback));
-
-    // Directly notify the subscriber that the subscription cancellation has been requested
-    if (!_impl->subscribe(subscription._impl)) {
-        subscription._impl->notify();
+    // none() token => do nothing and return an empty subscription
+    if (!_impl) {
+        return Subscription{};
     }
 
-    return subscription;
+    auto node = std::make_shared<Subscription::Impl>(std::move(callback));
+
+    // Register first, then if already canceled, notify immediately.
+    // This ensures consistent behavior even under races.
+    if (!_impl->addSubscription(node)) {
+        node->notify();
+        return Subscription{std::move(node)};
+    }
+
+    return Subscription{std::move(node)};
 }
 
 void CancellationToken::throwIfCancellationRequested() const
 {
-    if (_impl->canceled.load(std::memory_order_acquire)) {
+    if (isCancellationRequested()) {
         throw OperationCanceledException();
     }
 }
 
-/// Subscription
+/// CancellationTokenSource
 /// ========================================================================
 
-CancellationToken::Subscription::Subscription() = default;
-
-CancellationToken::Subscription::~Subscription() = default;
-
-void CancellationToken::Subscription::unsubscribe()
+CancellationTokenSource::CancellationTokenSource(): _impl{std::make_shared<CancellationToken::Impl>()}
 {
-    if (_impl) {
-        _impl->unsubscribe();
-        _impl.reset();
-    }
+}
+
+void CancellationTokenSource::cancel() const noexcept
+{
+    _impl->cancel();
+}
+
+bool CancellationTokenSource::isCancellationRequested() const noexcept
+{
+    return _impl->isCanceled();
+}
+
+CancellationToken CancellationTokenSource::token() const noexcept
+{
+    return CancellationToken{_impl};
 }
