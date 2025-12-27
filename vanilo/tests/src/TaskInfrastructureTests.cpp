@@ -6,9 +6,9 @@ using namespace vanilo::tasker;
 
 TEST_CASE("Run task: Result<Arg> without taking the result", "[task]")
 {
-    double result  = 0;
-    auto task      = [&result](double value) { return result = 3.21 * value; };
-    auto invokable = std::make_unique<internal::Invocable<decltype(task), double, double>>(nullptr, std::move(task));
+    double result = 0;
+    auto task = [&result](const double value) { return result = 3.21 * value; };
+    const auto invokable = std::make_unique<internal::Invocable<decltype(task), double, double>>(nullptr, std::move(task));
 
     invokable->setArgument(1.23);
     invokable->run();
@@ -18,10 +18,10 @@ TEST_CASE("Run task: Result<Arg> without taking the result", "[task]")
 
 TEST_CASE("Run task: void<void> and take std::future<void>", "[task]")
 {
-    auto value     = 0;
-    auto task      = [&value]() { value = 1; };
-    auto invokable = std::make_unique<internal::Invocable<decltype(task), void, void, true>>(nullptr, std::move(task));
-    auto future    = invokable->getFuture();
+    auto value = 0;
+    auto task = [&value]() { value = 1; };
+    const auto invokable = std::make_unique<internal::Invocable<decltype(task), void, void, true>>(nullptr, std::move(task));
+    auto future = invokable->getFuture();
 
     invokable->run();
     future.get();
@@ -31,10 +31,10 @@ TEST_CASE("Run task: void<void> and take std::future<void>", "[task]")
 
 TEST_CASE("Run task: void<Arg> and take std::future<void>", "[task]")
 {
-    auto value     = 0;
-    auto task      = [&value](int val) { value = val; };
-    auto invokable = std::make_unique<internal::Invocable<decltype(task), void, int, true>>(nullptr, std::move(task));
-    auto future    = invokable->getFuture();
+    auto value = 0;
+    auto task = [&value](const int val) { value = val; };
+    const auto invokable = std::make_unique<internal::Invocable<decltype(task), void, int, true>>(nullptr, std::move(task));
+    auto future = invokable->getFuture();
 
     invokable->setArgument(1);
     invokable->run();
@@ -45,9 +45,9 @@ TEST_CASE("Run task: void<Arg> and take std::future<void>", "[task]")
 
 TEST_CASE("Run task: Result<void> and take std::future<Result>", "[task]")
 {
-    auto task      = []() { return 123; };
-    auto invokable = std::make_unique<internal::Invocable<decltype(task), int, void, true>>(nullptr, std::move(task));
-    auto future    = invokable->getFuture();
+    auto task = [] { return 123; };
+    const auto invokable = std::make_unique<internal::Invocable<decltype(task), int, void, true>>(nullptr, std::move(task));
+    auto future = invokable->getFuture();
 
     invokable->run();
 
@@ -56,9 +56,9 @@ TEST_CASE("Run task: Result<void> and take std::future<Result>", "[task]")
 
 TEST_CASE("Run task: Result<Arg> and take std::future<Result>", "[task]")
 {
-    auto task      = [](double value) { return value * 3.21; };
-    auto invokable = std::make_unique<internal::Invocable<decltype(task), double, double, true>>(nullptr, std::move(task));
-    auto future    = invokable->getFuture();
+    auto task = [](const double value) { return value * 3.21; };
+    const auto invokable = std::make_unique<internal::Invocable<decltype(task), double, double, true>>(nullptr, std::move(task));
+    auto future = invokable->getFuture();
 
     invokable->setArgument(1.23);
     invokable->run();
@@ -68,72 +68,72 @@ TEST_CASE("Run task: Result<Arg> and take std::future<Result>", "[task]")
 
 TEST_CASE("Run task: void<void> and take std::future<void> with exception", "[task]")
 {
-    auto task      = []() { throw std::runtime_error{"Something happened"}; };
-    auto invokable = std::make_unique<internal::Invocable<decltype(task), void, void, true>>(nullptr, std::move(task));
-    auto future    = invokable->getFuture();
+    auto task = [] { throw std::invalid_argument{"Something happened"}; };
+    const auto invokable = std::make_unique<internal::Invocable<decltype(task), void, void, true>>(nullptr, std::move(task));
+    auto future = invokable->getFuture();
 
     invokable->run();
 
-    CHECK_THROWS_AS(future.get(), std::runtime_error);
+    CHECK_THROWS_AS(future.get(), std::invalid_argument);
 }
 
 TEST_CASE("Run task: void<void> chained and take std::future<void> with exception", "[task]")
 {
-    auto task1      = []() { throw std::runtime_error{"Something happened"}; };
-    auto task2      = []() {};
-    auto invokable1 = std::make_unique<internal::Invocable<decltype(task1), void, void, false>>(nullptr, std::move(task1));
+    auto task1 = [] { throw std::invalid_argument{"Something happened"}; };
+    auto task2 = [] { /* Ignore */ };
+    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task1), void, void>>(nullptr, std::move(task1));
     auto invokable2 = std::make_unique<internal::Invocable<decltype(task2), void, void, true>>(nullptr, std::move(task2));
-    auto future     = invokable2->getFuture();
+    auto future = invokable2->getFuture();
 
     invokable1->setNext(std::move(invokable2));
     invokable1->run();
 
-    CHECK_THROWS_AS(future.get(), std::runtime_error);
+    CHECK_THROWS_AS(future.get(), std::invalid_argument);
 }
 
 TEST_CASE("Run task: void<void> convert to PromisedTask", "[task]")
 {
     auto value = 0;
-    auto task  = [&value]() {
+    auto task = [&value] {
         value = 1;
-        throw std::runtime_error{"Something happened"};
+        throw std::invalid_argument{"Something happened"};
     };
-    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, void, false>>(nullptr, std::move(task));
-    auto invokable2 = invokable1->toPromisedTask();
-    auto future     = invokable2->getFuture();
+    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, void>>(nullptr, std::move(task));
+    const auto invokable2 = invokable1->toPromisedTask();
+    auto future = invokable2->getFuture();
 
     invokable2->run();
 
-    CHECK_THROWS_AS(future.get(), std::runtime_error);
+    CHECK_THROWS_AS(future.get(), std::invalid_argument);
     REQUIRE(value == 1);
 }
 
 TEST_CASE("Run task: void<Arg> convert to PromisedTask", "[task]")
 {
     auto value = 0;
-    auto task  = [&value](int val) {
+    auto task = [&value](const int val) {
         value = val;
-        throw std::runtime_error{"Something happened"};
+        throw std::invalid_argument{"Something happened"};
     };
-    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, int, false>>(nullptr, std::move(task));
+    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, int>>(nullptr, std::move(task));
 
     invokable1->setArgument(123);
 
-    auto invokable2 = invokable1->toPromisedTask();
-    auto future     = invokable2->getFuture();
+    const auto invokable2 = invokable1->toPromisedTask();
+    auto future = invokable2->getFuture();
 
     invokable2->run();
 
-    CHECK_THROWS_AS(future.get(), std::runtime_error);
+    CHECK_THROWS_AS(future.get(), std::invalid_argument);
     REQUIRE(value == 123);
 }
 
 TEST_CASE("Run task: Result<void> convert to PromisedTask", "[task]")
 {
-    auto task       = []() { return 123; };
-    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), int, void, false>>(nullptr, std::move(task));
-    auto invokable2 = invokable1->toPromisedTask();
-    auto future     = invokable2->getFuture();
+    auto task = [] { return 123; };
+    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), int, void>>(nullptr, std::move(task));
+    const auto invokable2 = invokable1->toPromisedTask();
+    auto future = invokable2->getFuture();
 
     invokable2->run();
 
@@ -142,13 +142,13 @@ TEST_CASE("Run task: Result<void> convert to PromisedTask", "[task]")
 
 TEST_CASE("Run task: Result<Arg> convert to PromisedTask", "[task]")
 {
-    auto task       = [](double arg) { return arg * 3.21; };
-    auto invokable1 = std::make_unique<internal::Invocable<decltype(task), double, double, false>>(nullptr, std::move(task));
+    auto task = [](const double arg) { return arg * 3.21; };
+    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), double, double>>(nullptr, std::move(task));
 
     invokable1->setArgument(1.23);
 
-    auto invokable2 = invokable1->toPromisedTask();
-    auto future     = invokable2->getFuture();
+    const auto invokable2 = invokable1->toPromisedTask();
+    auto future = invokable2->getFuture();
 
     invokable2->run();
 

@@ -55,7 +55,7 @@ class StopThreadTask final: public Task
 /// DefaultThreadPoolExecutor implementation
 /// ================================================================================================
 
-DefaultThreadPoolExecutor::DefaultThreadPoolExecutor(size_t numThreads)
+DefaultThreadPoolExecutor::DefaultThreadPoolExecutor(const size_t numThreads)
 {
     init(numThreads);
 }

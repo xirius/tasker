@@ -14,6 +14,7 @@ class CustomTask: public Task
 
     void cancel() noexcept override
     {
+        // Ignore
     }
 
     void run() override
@@ -143,15 +144,15 @@ SCENARIO("Test cancellation of tasks when ThreadPoolExecutor is released", "[poo
     GIVEN("An initial executor with 0 threads")
     {
         auto executor = ThreadPoolExecutor::create(0);
-        bool isCancelled = false;
-        bool nonExecuted = true;
 
         WHEN("Task is submitted and executor is then released")
         {
-            Task::run(executor.get(), [&nonExecuted]() {
+            bool nonExecuted = true;
+            bool isCancelled = false;
+            Task::run(executor.get(), [&nonExecuted] {
                 nonExecuted = false;
-            }).onException(executor.get(), [&isCancelled](std::exception& ex, CancellationToken& token) {
-                isCancelled = token.isCancellationRequested() && dynamic_cast<OperationCanceledException*>(&ex) != nullptr;
+            }).onException(executor.get(), [&isCancelled](std::exception& ex, const CancellationToken&) {
+                isCancelled = dynamic_cast<OperationCanceledException*>(&ex) != nullptr;
             });
 
             executor.reset();

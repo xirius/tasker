@@ -45,7 +45,7 @@ size_t DefaultLocalThreadExecutor::process(const size_t maxCount)
     return _queue.size();
 }
 
-size_t DefaultLocalThreadExecutor::process(CancellationToken& token)
+size_t DefaultLocalThreadExecutor::process(const CancellationToken& token)
 {
     std::unique_ptr<Task> task;
 

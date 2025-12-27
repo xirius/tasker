@@ -120,13 +120,13 @@ namespace vanilo::concurrent {
 
         /**
          * Retrieves the first element from the queue (blocking). The element is removed from the queue.
-         * This method blocks until an element is available or unless clear is called, cancellation token
-         * is in canceled state or the instance is destructed.
+         * This method blocks until an element is available or unless clear is called, the cancellation token is in the
+         * canceled state, or the instance is destructed.
          * @param token The cancellation token.
          * @param out The retrieved element from the queue.
          * @return True if an element was successfully written to the out parameter, false otherwise.
          */
-        bool waitDequeue(CancellationToken& token, T& out)
+        bool waitDequeue(const CancellationToken& token, T& out)
         {
             bool canceled = false;
             auto subscription = token.subscribe([this, &canceled] {

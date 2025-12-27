@@ -14,7 +14,7 @@ namespace vanilo::tasker {
       public:
         [[nodiscard]] size_t count() const override;
         size_t process(size_t maxCount) override;
-        size_t process(CancellationToken& token) override;
+        size_t process(const CancellationToken& token) override;
         void submit(std::unique_ptr<Task> task) override;
 
       private:

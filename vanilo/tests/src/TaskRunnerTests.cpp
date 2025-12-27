@@ -10,17 +10,17 @@ void test_11(int& result)
     result += 1;
 }
 
-void test_21(CancellationToken& token, int& result)
+void test_21(const CancellationToken&, int& result)
 {
     result += 1;
 }
 
-void test_22(const CancellationToken& token, int& result)
+void test_22(const CancellationToken&, int& result)
 {
     result += 1;
 }
 
-void test_23(const CancellationToken& token, int& result) noexcept
+void test_23(const CancellationToken&, int& result) noexcept
 {
     result += 1;
 }
@@ -32,42 +32,42 @@ struct Foo
         result += 1;
     }
 
-    static void bar_21(CancellationToken& token, int& result)
+    static void bar_21(const CancellationToken&, int& result)
     {
         result += 1;
     }
 
-    static void bar_22(const CancellationToken& token, int& result)
+    static void bar_22(const CancellationToken&, int& result)
     {
         result += 1;
     }
 
-    static void bar_23(const CancellationToken& token, int& result) noexcept
+    static void bar_23(const CancellationToken&, int& result) noexcept
     {
         result += 1;
     }
 
-    void mbar_12(CancellationToken& token, int& result)
+    void mbar_12(const CancellationToken&, int& result)
     {
         result += 1;
     }
 
-    void mbar_21(CancellationToken& token, int& result)
+    void mbar_21(const CancellationToken&, int& result)
     {
         result += 1;
     }
 
-    void mbar_22(const CancellationToken& token, int& result)
+    void mbar_22(const CancellationToken&, int& result)
     {
         result += 1;
     }
 
-    void mbar_23(const CancellationToken& token, int& result) const
+    void mbar_23(const CancellationToken&, int& result) const
     {
         result += 1;
     }
 
-    void mbar_24(const CancellationToken& token, int& result) const noexcept
+    void mbar_24(const CancellationToken&, int& result) const noexcept
     {
         result += 1;
     }
@@ -81,12 +81,11 @@ SCENARIO("Task::run #1 void<>", "[task runner]")
     GIVEN("A local executor")
     {
         auto executor = LocalThreadExecutor::create();
-        int result    = 0;
-        Foo foo;
+        int result = 0;
 
         WHEN("Task is a Lambda function")
         {
-            Task::run(executor.get(), [&]() {
+            Task::run(executor.get(), [&result] {
                 result = 1; // Flag to confirm execution
             });
 
@@ -127,6 +126,7 @@ SCENARIO("Task::run #1 void<>", "[task runner]")
 
         WHEN("Task is a member function")
         {
+            Foo foo;
             Task::run(executor.get(), &Foo::mbar_12, foo, std::ref(result));
 
             executor->process(1);
@@ -145,20 +145,19 @@ SCENARIO("Task::run #2 void<[CancellationToken]>", "[task runner]")
     GIVEN("A local executor")
     {
         auto executor = LocalThreadExecutor::create();
-        int result    = 0;
-        Foo foo;
+        int result = 0;
 
         WHEN("Task is a Lambda function #1")
         {
-            Task::run(executor.get(), [&](CancellationToken& token) {
+            Task::run(executor.get(), [&result](const CancellationToken&) {
                 result += 1; // Flag to confirm execution
             });
 
-            Task::run(executor.get(), [&](const CancellationToken& token) {
+            Task::run(executor.get(), [&result](const CancellationToken&) {
                 result += 1; // Flag to confirm execution
             });
 
-            Task::run(executor.get(), [&](const CancellationToken& token) noexcept {
+            Task::run(executor.get(), [&result](const CancellationToken&) noexcept {
                 result += 1; // Flag to confirm execution
             });
 
@@ -203,6 +202,7 @@ SCENARIO("Task::run #2 void<[CancellationToken]>", "[task runner]")
 
         WHEN("Task is a member function")
         {
+            Foo foo;
             Task::run(executor.get(), &Foo::mbar_21, foo, std::ref(result));
             Task::run(executor.get(), &Foo::mbar_22, foo, std::ref(result));
             Task::run(executor.get(), &Foo::mbar_23, foo, std::ref(result));
@@ -223,7 +223,7 @@ SCENARIO("Task::run #3 Result<void> -> Result<Arg>", "[task runner]")
 {
     GIVEN("A local executor")
     {
-        auto executor = LocalThreadExecutor::create();
+        const auto executor = LocalThreadExecutor::create();
 
         WHEN("Future is taken from 1 level task #1")
         {
@@ -240,11 +240,11 @@ SCENARIO("Task::run #3 Result<void> -> Result<Arg>", "[task runner]")
 
         WHEN("Future is taken from 2 level task #1")
         {
-            auto future = Task::run(executor.get(), []() {
-                              return 1.23; // pass to the next task
-                          }).then(executor.get(), [](double arg) {
-                                return arg * 3.21;
-                            }).getFuture();
+            auto future = Task::run(executor.get(), [] {
+                return 1.23; // pass to the next task
+            }).then(executor.get(), [](const double arg) {
+                return arg * 3.21;
+            }).getFuture();
 
             executor->process(2);
 
@@ -259,14 +259,12 @@ SCENARIO("Task::run #3 Result<void> -> Result<Arg>", "[task runner]")
 
 TEST_CASE("Run task: Chaining tasks", "[task]")
 {
-    auto executor = LocalThreadExecutor::create();
+    const auto executor = LocalThreadExecutor::create();
     int result{0};
 
-    Task::run(executor.get(), []() {
-        return 123;
-    }).then(executor.get(), [&result](int x) {
-          result = x;
-      }).then(executor.get(), [&result]() { result = result * 2; });
+    Task::run(executor.get(), []() { return 123; }).then(executor.get(), [&result](const int x) {
+        result = x;
+    }).then(executor.get(), [&result]() { result = result * 2; });
 
     executor->process(3);
 
