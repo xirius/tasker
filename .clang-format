@@ -132,7 +132,9 @@ PackConstructorInitializers: BinPack
 #PenaltyBreakTemplateDeclaration:
 #PenaltyExcessCharacter:
 #PenaltyIndentedWhitespace:
-#PenaltyReturnTypeOnItsOwnLine:
+
+# keep return type and function name together
+PenaltyReturnTypeOnItsOwnLine: 1000000
 
 PointerAlignment: Left
 QualifierAlignment: Leave

@@ -9,7 +9,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 # Set Catch2-specific options.
 set(CATCH_BUILD_STATIC_LIBRARY ON CACHE BOOL "Build Catch2 as a static library" FORCE)
 
-set(VERSION "v3.10.0")
+set(VERSION "v3.11.0")
 
 FetchContent_Declare(
 catch2

@@ -3,17 +3,17 @@
 
 #include <functional>
 #include <memory>
+#include <stdexcept>
 
 namespace vanilo::concurrent {
     /**
      * This exception occurs when you're waiting for a result, then a cancellation is notified.
      */
-    class VANILO_EXPORT OperationCanceledException final: public std::exception
+    class VANILO_EXPORT OperationCanceledException final: public std::runtime_error
     {
       public:
-        [[nodiscard]] const char* what() const noexcept override
+        OperationCanceledException(): std::runtime_error("The operation was canceled.")
         {
-            return "The operation was canceled.";
         }
     };
 
@@ -73,7 +73,7 @@ namespace vanilo::concurrent {
         /**
          * Unregisters the target callback from the associated CancellationToken.
          */
-        void unsubscribe() const;
+        void unsubscribe();
 
       private:
         Subscription();

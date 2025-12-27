@@ -8,6 +8,7 @@
 #include <any>
 #include <cassert>
 #include <future>
+#include <optional>
 
 namespace vanilo::tasker {
 
@@ -32,6 +33,10 @@ namespace vanilo::tasker {
 
         template <typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, void>>
         static auto run(TaskExecutor* executor, CancellationToken token, TaskFunc&& func, Args&&... args);
+
+        template <class Rep, class Period, typename TaskFunc, typename... Args, typename TaskBuilder = Builder<void, TaskFunc, void>>
+        static auto run(
+            TaskExecutor* executor, CancellationToken token, std::chrono::duration<Rep, Period> delay, TaskFunc&& func, Args&&... args);
 
         virtual ~Task() = default;
 
@@ -71,7 +76,7 @@ namespace vanilo::tasker {
 
         /**
          * Processes max number of tasks in the queue if any present.
-         * @param maxCount the maximum number of task to process.
+         * @param maxCount the maximum number of tasks to process.
          * @return The number of the unprocessed tasks in the queue.
          */
         virtual size_t process(size_t maxCount) = 0;
@@ -157,7 +162,29 @@ namespace vanilo::tasker {
           protected:
             explicit BaseTaskBuilder(std::unique_ptr<ChainableTask> task);
 
+          private:
             std::unique_ptr<ChainableTask> _task;
+        };
+
+        /// TaskManager declaration
+        /// ========================================================================================
+
+        class TaskManager
+        {
+          public:
+            using steady_clock = std::chrono::steady_clock;
+            using system_clock = std::chrono::system_clock;
+
+            template <class Rep, class Period>
+            static std::unique_ptr<ChainableTask> convertTask(
+                std::unique_ptr<ChainableTask> task, std::chrono::duration<Rep, Period> delay);
+
+            /*static std::unique_ptr<ChainableTask> createTask(
+                std::unique_ptr<ChainableTask> task,
+                steady_clock::time_point delay,
+                std::optional<steady_clock::duration> period = std::nullopt);*/
+          private:
+            static std::unique_ptr<ChainableTask> convertTask(std::unique_ptr<ChainableTask> task, steady_clock::duration delay);
         };
     } // namespace internal
 
@@ -207,7 +234,7 @@ namespace vanilo::tasker {
         auto onException(TaskFunc&& func, Args&&... args);
 
       private:
-        using Task::Builder<Invocable, Signature, Arg, false>::Builder;
+        using Builder<Invocable, Signature, Arg, false>::Builder;
     };
 
     namespace internal {
@@ -375,7 +402,7 @@ namespace vanilo::tasker {
         };
 
         /**
-         * Represents a specialization of an abstract generic chainable task without parameter.
+         * Represents a specialization of an abstract generic chainable task without a parameter.
          */
         template <>
         class ParameterizedChainableTask<void>: public ChainableTask
@@ -390,14 +417,11 @@ namespace vanilo::tasker {
             template <typename C, typename R, typename A>
             friend class PromisedTask;
 
-            using ErrorHandler = bool (*)(TaskExecutor* executor, CancellationToken&, Callable&, std::any&, std::exception_ptr&);
+            using ErrorHandler =
+                bool (*)(const TaskExecutor* executor, const CancellationToken&, Callable&, const std::any&, const std::exception_ptr&);
 
           public:
-            explicit BaseTask(TaskExecutor* executor, Callable&& task)
-                : ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)},
-                  _errorHandler{[](TaskExecutor* /*executor*/, CancellationToken&, Callable&, std::any&, std::exception_ptr&) {
-                      return false; // Exception was not handled
-                  }}
+            explicit BaseTask(TaskExecutor* executor, Callable&& task): ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}
             {
             }
 
@@ -463,15 +487,13 @@ namespace vanilo::tasker {
 
             void handleException(std::exception_ptr exPtr) override
             {
-                auto lastTask = this->getLastTask();
-
-                if (lastTask->isPromised()) {
+                if (auto lastTask = this->getLastTask(); lastTask->isPromised()) {
                     lastTask->handleException(std::move(exPtr));
                     return;
                 }
 
                 if (!_errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr)) {
-                    // Exception was not handled by the task, so it is rethrown
+                    // The task did not handle exception, so it is rethrown
                     std::rethrow_exception(exPtr);
                 }
             }
@@ -525,7 +547,10 @@ namespace vanilo::tasker {
             Callable _task;
             TaskExecutor* _errorExecutor{};
             std::any _errorMetadata{};
-            ErrorHandler _errorHandler;
+            ErrorHandler _errorHandler =
+                [](const TaskExecutor* /*executor*/, const CancellationToken&, Callable&, const std::any&, const std::exception_ptr&) {
+                return false; // Exception was not handled
+            };
         };
 
         template <typename Callable, typename Result, typename Arg>
@@ -544,7 +569,7 @@ namespace vanilo::tasker {
 
           protected:
             explicit PromisedTask(BaseTask<Callable, Result, Arg>&& other) noexcept
-                : ParameterizedChainableTask<Arg>{std::forward<BaseTask<Callable, Result, Arg>>(other)}, _task{std::move(other._task)}
+                : ParameterizedChainableTask<Arg>{other}, _task{std::move(other._task)}
             {
             }
 
@@ -610,7 +635,7 @@ namespace vanilo::tasker {
 
           protected:
             explicit PromisedTask(BaseTask<Callable, void, Arg>&& other) noexcept
-                : ParameterizedChainableTask<Arg>{std::forward<BaseTask<Callable, void, Arg>>(other)}, _task{std::move(other._task)}
+                : ParameterizedChainableTask<Arg>{other}, _task{std::move(other._task)}
             {
             }
 
@@ -666,7 +691,7 @@ namespace vanilo::tasker {
             }
 
             explicit Invocable(BaseInvocable<Callable, Result, Arg, false>&& other) noexcept
-                : BaseInvocable<Callable, Result, Arg, true>{std::forward<BaseInvocable<Callable, Result, Arg, false>>(other)}
+                : BaseInvocable<Callable, Result, Arg, true>{other}
             {
             }
 
@@ -707,7 +732,7 @@ namespace vanilo::tasker {
             }
 
             explicit Invocable(BaseInvocable<Callable, Result, void, false>&& other) noexcept
-                : BaseInvocable<Callable, Result, void, true>{std::forward<BaseInvocable<Callable, Result, void, false>>(other)}
+                : BaseInvocable<Callable, Result, void, true>{other}
             {
             }
 
@@ -747,8 +772,7 @@ namespace vanilo::tasker {
             {
             }
 
-            explicit Invocable(BaseInvocable<Callable, void, Arg, false>&& other) noexcept
-                : BaseInvocable<Callable, void, Arg, true>{std::forward<BaseInvocable<Callable, void, Arg, false>>(other)}
+            explicit Invocable(BaseInvocable<Callable, void, Arg, false>&& other) noexcept: BaseInvocable<Callable, void, Arg, true>{other}
             {
             }
 
@@ -781,7 +805,7 @@ namespace vanilo::tasker {
             }
 
             explicit Invocable(BaseInvocable<Callable, void, void, false>&& other) noexcept
-                : BaseInvocable<Callable, void, void, true>{std::forward<BaseInvocable<Callable, void, void, false>>(other)}
+                : BaseInvocable<Callable, void, void, true>{BaseInvocable<Callable, void, void, false>(other)}
             {
             }
 
@@ -863,6 +887,34 @@ namespace vanilo::tasker {
                 executor->submit(std::move(_task));
             }
         }
+
+        /// TaskManager declaration
+        /// ========================================================================================
+
+        template <class Rep, class Period>
+        std::unique_ptr<ChainableTask> TaskManager::convertTask(
+            std::unique_ptr<ChainableTask> task, std::chrono::duration<Rep, Period> delay)
+        {
+            return convertTask(std::move(task), std::chrono::duration_cast<steady_clock::duration>(delay));
+        }
+
+        /*
+        class TaskManager
+        {
+        public:
+            using steady_clock = std::chrono::steady_clock;
+            using system_clock = std::chrono::system_clock;
+
+            template <class Rep, class Period>
+            static std::unique_ptr<ChainableTask> convertTask(
+                std::unique_ptr<ChainableTask> task, std::chrono::duration<Rep, Period> delay);
+
+            static std::unique_ptr<ChainableTask> createTask(
+                std::unique_ptr<ChainableTask> task,
+                steady_clock::time_point delay,
+                std::optional<steady_clock::duration> period = std::nullopt);
+        };
+        */
 
     } // namespace internal
 
@@ -948,6 +1000,26 @@ namespace vanilo::tasker {
         auto last = invocable.get();
 
         return Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(invocable), last, last};
+    }
+
+    template <class Rep, class Period, typename TaskFunc, typename... Args, typename TaskBuilder>
+    auto Task::run(
+        TaskExecutor* executor, CancellationToken token, std::chrono::duration<Rep, Period> delay, TaskFunc&& func, Args&&... args)
+    {
+        if (!delay.count()) {
+            return Task::run(executor, token, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        }
+
+        constexpr bool HasToken = std::is_same_v<std::decay_t<typename TaskBuilder::FirstArg>, CancellationToken>;
+        constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
+
+        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, IsMember, HasToken>::createInvocable(
+            executor, std::move(token), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        auto last = invocable.get();
+        auto scheduled = internal::TaskManager::convertTask(std::move(invocable), delay);
+        auto current = scheduled.get();
+
+        return Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(scheduled), current, last};
     }
 
 } // namespace vanilo::tasker

@@ -9,7 +9,7 @@ namespace vanilo::tasker {
     /// DefaultLocalThreadExecutor
     /// ============================================================================================
 
-    class DefaultLocalThreadExecutor: public LocalThreadExecutor
+    class DefaultLocalThreadExecutor final: public LocalThreadExecutor
     {
       public:
         [[nodiscard]] size_t count() const override;

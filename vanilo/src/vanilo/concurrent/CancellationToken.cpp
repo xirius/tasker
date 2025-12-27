@@ -46,14 +46,20 @@ struct CancellationToken::Impl
 {
     void cancel()
     {
+        std::vector<std::weak_ptr<Subscription::Impl>> snapshot;
+
         {
             // Mutually exclusive with subscribe method
             std::lock_guard lock{mutex};
-            canceled = true;
+            if (canceled.exchange(true, std::memory_order_release)) {
+                return; // already canceled
+            }
+
+            snapshot = subscriptions; // copy
         }
 
         // Callbacks have to be called without acquired mutex
-        for (const auto& subscription : subscriptions) {
+        for (const auto& subscription : snapshot) {
             if (const auto callback = subscription.lock()) {
                 callback->notify();
             }
@@ -70,12 +76,12 @@ struct CancellationToken::Impl
         std::lock_guard lock{mutex};
         const size_t collectionSize = subscriptions.size();
 
-        if (canceled) {
+        if (canceled.load(std::memory_order_acquire)) {
             return false;
         }
 
         // Try to reuse freed slots
-        for (size_t i = index; i < collectionSize; i++) {
+        for (size_t i = 0; i < collectionSize; i++) {
             auto& item = subscriptions[i];
 
             if (const auto pointer = item.lock(); !pointer) {
@@ -83,20 +89,16 @@ struct CancellationToken::Impl
                 item = std::move(subscription);
                 return true;
             }
-
-            index = i;
         }
 
         // No free slot found
         subscriptions.push_back(std::move(subscription));
-        index = 0;
         return true;
     }
 
     std::vector<std::weak_ptr<Subscription::Impl>> subscriptions{};
     std::atomic_bool canceled{};
     std::mutex mutex{};
-    size_t index{0};
 };
 
 /// CancellationToken
@@ -133,7 +135,7 @@ void CancellationToken::cancel() const
 
 bool CancellationToken::isCancellationRequested() const noexcept
 {
-    return _impl->canceled.load();
+    return _impl->canceled.load(std::memory_order_acquire);
 }
 
 CancellationToken::Subscription CancellationToken::subscribe(std::function<void()> callback) const
@@ -151,7 +153,7 @@ CancellationToken::Subscription CancellationToken::subscribe(std::function<void(
 
 void CancellationToken::throwIfCancellationRequested() const
 {
-    if (_impl->canceled) {
+    if (_impl->canceled.load(std::memory_order_acquire)) {
         throw OperationCanceledException();
     }
 }
@@ -163,7 +165,10 @@ CancellationToken::Subscription::Subscription() = default;
 
 CancellationToken::Subscription::~Subscription() = default;
 
-void CancellationToken::Subscription::unsubscribe() const
+void CancellationToken::Subscription::unsubscribe()
 {
-    _impl->unsubscribe();
+    if (_impl) {
+        _impl->unsubscribe();
+        _impl.reset();
+    }
 }

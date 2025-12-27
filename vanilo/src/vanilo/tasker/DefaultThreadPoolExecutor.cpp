@@ -34,7 +34,7 @@ class StopThreadTask final: public Task
         if (std::this_thread::get_id() == _thread.get_id()) {
             _thread.detach();
 
-            if (--(*_counter) == 0) {
+            if (--*_counter == 0) {
                 // All the scheduled threads that have to be stopped are found
                 _promise->set_value();
             }
@@ -82,11 +82,11 @@ size_t DefaultThreadPoolExecutor::threadCount() const noexcept
 
 std::vector<std::thread::id> DefaultThreadPoolExecutor::threadIds() const
 {
-    std::function<std::thread::id(const std::thread&)> selector = [](auto& thread) { return thread.get_id(); };
+    const std::function<std::thread::id(const std::thread&)> selector = [](auto& thread) { return thread.get_id(); };
     return _threads.toList(selector);
 }
 
-std::future<void> DefaultThreadPoolExecutor::resize(size_t numThreads)
+std::future<void> DefaultThreadPoolExecutor::resize(const size_t numThreads)
 {
     std::lock_guard _lock{_mutex};
     auto promise = std::make_shared<std::promise<void>>();
@@ -123,7 +123,7 @@ void DefaultThreadPoolExecutor::submit(std::unique_ptr<Task> task)
 }
 
 //! Private members
-void DefaultThreadPoolExecutor::init(size_t numThreads)
+void DefaultThreadPoolExecutor::init(const size_t numThreads)
 {
     try {
         resize(numThreads);

@@ -9,7 +9,7 @@ namespace vanilo::tasker {
     /// DefaultThreadPoolExecutor
     /// ============================================================================================
 
-    class DefaultThreadPoolExecutor: public ThreadPoolExecutor
+    class DefaultThreadPoolExecutor final: public ThreadPoolExecutor
     {
       public:
         explicit DefaultThreadPoolExecutor(size_t numThreads);

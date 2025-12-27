@@ -1,11 +1,11 @@
-#include <vanilo/tasker/DefaultLocalThreadExecutor.h>
+#include "vanilo/tasker/DefaultLocalThreadExecutor.h"
 
 using namespace vanilo::tasker;
 
 /// Helper methods
 /// ================================================================================================
 
-inline void executeTask(const std::unique_ptr<Task>& task)
+inline void executeTask(Task* task)
 {
     try {
         task->run();
@@ -36,7 +36,7 @@ size_t DefaultLocalThreadExecutor::process(const size_t maxCount)
     std::unique_ptr<Task> task;
 
     while (_queue.tryDequeue(task)) {
-        executeTask(task);
+        executeTask(task.get());
 
         if (++counter >= maxCount)
             break;
@@ -50,7 +50,7 @@ size_t DefaultLocalThreadExecutor::process(CancellationToken& token)
     std::unique_ptr<Task> task;
 
     while (_queue.waitDequeue(token, task)) {
-        executeTask(task);
+        executeTask(task.get());
     }
 
     return _queue.size();
