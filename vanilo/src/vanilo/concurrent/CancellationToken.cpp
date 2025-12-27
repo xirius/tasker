@@ -1,6 +1,7 @@
 #include <vanilo/concurrent/CancellationToken.h>
 #include <vanilo/core/Tracer.h>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <vector>
@@ -118,26 +119,82 @@ struct CancellationToken::Impl
             return false;
         }
 
-        // Try to reuse freed slots
-        const size_t collectionSize = subscriptions.size();
-        for (size_t i = 0; i < collectionSize; i++) {
-            auto& item = subscriptions[i];
+        // 1) Try the free-list first (validate entries)
+        while (!freeSlots.empty()) {
+            const size_t idx = freeSlots.back();
+            freeSlots.pop_back();
 
-            if (const auto pointer = item.lock(); !pointer) {
-                // Free slot found
-                item = std::move(subscription);
-                return true;
+            if (idx < subscriptions.size()) {
+                if (auto& slot = subscriptions[idx]; slot.expired()) {
+                    slot = std::move(subscription);
+                    const size_t size = subscriptions.size();
+                    probeIndex = size ? (idx + 1) % size : 0;
+                    return true;
+                }
+            }
+            // stale entry -> skip
+        }
+
+        const size_t subscriptionsSize = subscriptions.size();
+
+        // 2) Bounded scan around probeIndex; collect a few extra free slots on the way
+        const size_t maxScan = subscriptionsSize > 0 ? std::min<size_t>(subscriptionsSize, kMaxScan) : 0;
+        auto chosen = static_cast<size_t>(-1);
+
+        for (size_t scanned = 0; scanned < maxScan; ++scanned) {
+            size_t slotIndex = probeIndex + scanned;
+            if (slotIndex >= subscriptionsSize) {
+                slotIndex -= subscriptionsSize; // wrap
+            }
+
+            if (auto& slot = subscriptions[slotIndex]; slot.expired()) {
+                if (chosen == static_cast<size_t>(-1)) {
+                    chosen = slotIndex; // use this one for the current insertion
+                }
+                else if (freeSlots.size() < kMaxFree) {
+                    freeSlots.push_back(slotIndex); // remember for later
+                }
             }
         }
 
-        // No free slot found
+        if (chosen != static_cast<size_t>(-1)) {
+            subscriptions[chosen] = std::move(subscription);
+            probeIndex = subscriptionsSize ? (chosen + 1) % subscriptionsSize : 0;
+            return true;
+        }
+
+        // 3) Full scan (once in a while) and collect some free slots
+        for (size_t i = 0; i < subscriptionsSize; ++i) {
+            if (auto& slot = subscriptions[i]; slot.expired()) {
+                if (chosen == static_cast<size_t>(-1)) {
+                    chosen = i;
+                }
+                else if (freeSlots.size() < kMaxFree) {
+                    freeSlots.push_back(i);
+                }
+            }
+        }
+
+        if (chosen != static_cast<size_t>(-1)) {
+            subscriptions[chosen] = std::move(subscription);
+            probeIndex = subscriptionsSize ? (chosen + 1) % subscriptionsSize : 0;
+            return true;
+        }
+
+        // 4) No free slot found -> append
         subscriptions.push_back(std::move(subscription));
+        probeIndex = 0;
         return true;
     }
 
     std::vector<std::weak_ptr<Subscription::Impl>> subscriptions{};
     std::atomic_bool canceled{};
     std::mutex mutex{};
+    size_t probeIndex{0};
+    std::vector<size_t> freeSlots{};
+
+    static constexpr size_t kMaxScan = 16;
+    static constexpr size_t kMaxFree = 16;
 };
 
 /// CancellationToken
