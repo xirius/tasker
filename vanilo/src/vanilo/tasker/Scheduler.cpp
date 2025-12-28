@@ -5,11 +5,42 @@
 using namespace vanilo::tasker;
 
 namespace {
+    /// Generates a monotonically increasing sequence number for strict-weak ordering tie-breaks
     std::uint64_t nextSequence()
     {
         static std::atomic_uint64_t counter{0};
         return counter.fetch_add(1, std::memory_order_relaxed);
     }
+
+    /// Adapter to allow scheduling of arbitrary Task instances that are not chainable/scheduled.
+    class RunTaskAdapter final: public internal::ChainableTask
+    {
+      public:
+        RunTaskAdapter(TaskExecutor* executor, std::unique_ptr<Task> task): ChainableTask{executor}, _task{std::move(task)}
+        {
+        }
+
+        void run() override
+        {
+            if (_task && !isCanceled()) {
+                _task->run();
+            }
+
+            scheduleNext();
+        }
+
+      private:
+        [[nodiscard]] bool isPromised() const noexcept override
+        {
+            return false;
+        }
+
+        void handleException(std::exception_ptr) override
+        {
+        }
+
+        std::unique_ptr<Task> _task;
+    };
 } // namespace
 
 /// ScheduledTask
@@ -101,7 +132,10 @@ void TaskScheduler::submit(std::unique_ptr<Task> task)
         scheduled->setNext(std::move(chainable));
     }
     else {
-        // Create UnknownTask which will call task->run as we don't have info about it executor
+        // Wrap a generic Task into a chainable adapter so it can be scheduled and executed
+        auto adapter = std::make_unique<RunTaskAdapter>(this, std::move(task));
+        scheduled = ScheduledTask::create(this, std::chrono::steady_clock::now());
+        scheduled->setNext(std::move(adapter));
     }
     {
         std::scoped_lock lock(_mutex);

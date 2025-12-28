@@ -65,9 +65,10 @@ namespace vanilo::tasker {
     {
         bool operator()(const std::unique_ptr<ScheduledTask>& a, const std::unique_ptr<ScheduledTask>& b) const noexcept
         {
+            // Order by the earliest due first; tie-break by smaller sequence first
             if (a->due() == b->due())
-                return a->sequence() > b->sequence();
-            return a->due() > b->due(); // min-heap via greater-than
+                return a->sequence() < b->sequence();
+            return a->due() < b->due();
         }
     };
 
