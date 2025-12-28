@@ -37,6 +37,7 @@ namespace {
 
         void handleException(std::exception_ptr) override
         {
+            // Ignore
         }
 
         std::unique_ptr<Task> _task;
@@ -133,8 +134,9 @@ void TaskScheduler::submit(std::unique_ptr<Task> task)
     }
     else {
         // Wrap a generic Task into a chainable adapter so it can be scheduled and executed
-        auto adapter = std::make_unique<RunTaskAdapter>(task->, std::move(task));
-        scheduled = ScheduledTask::create(this, std::chrono::steady_clock::now());
+        static auto defaultThreadPool = ThreadPoolExecutor::create(1);
+        auto adapter = std::make_unique<RunTaskAdapter>(defaultThreadPool.get(), std::move(task));
+        scheduled = ScheduledTask::create(defaultThreadPool.get(), std::chrono::steady_clock::now());
         scheduled->setNext(std::move(adapter));
     }
 
@@ -194,7 +196,7 @@ bool TaskScheduler::waitUntilTopIsDue(std::unique_lock<std::mutex>& lock)
     if (_queue.empty())
         return false;
 
-    if (const auto now = std::chrono::steady_clock::now(); !(_queue.empty()) && (*_queue.begin())->due() > now) {
+    if (const auto now = std::chrono::steady_clock::now(); !_queue.empty() && (*_queue.begin())->due() > now) {
         auto until = (*_queue.begin())->due();
         _condition.wait_until(lock, until, [this, until] { return shouldStop() || _queue.empty() || (*_queue.begin())->due() < until; });
         return true;
@@ -217,14 +219,20 @@ void TaskScheduler::rescheduleIfNeeded(std::unique_ptr<ScheduledTask>& current)
 
     bool reschedule = false;
     if (current->isPeriodic()) {
-        // drift-free: step forward from prior 'due'
-        current->setDue(current->due() + current->interval());
+        // O(1) drift-free catch-up: compute how many intervals we need to jump ahead
+        if (const auto interval = current->interval(); interval.count() > 0) {
+            const auto prevDue = current->due();
+            const auto now = std::chrono::steady_clock::now();
 
-        // catch up if we fell behind
-        const auto now = std::chrono::steady_clock::now();
+            // We must schedule at least one period ahead of previous due
+            // periods = 1 if we are still ahead of now, otherwise jump by the number of missed intervals + 1
+            std::int64_t periods = 1;
+            if (now > prevDue) {
+                const auto behind = now - prevDue; // non-negative
+                periods += behind / interval;
+            }
 
-        while (current->due() <= now) {
-            current->setDue(current->due() + current->interval());
+            current->setDue(prevDue + interval * periods);
         }
 
         reschedule = true;

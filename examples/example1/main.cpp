@@ -14,7 +14,7 @@ int main()
     auto start = std::chrono::steady_clock::now();
     auto source = CancellationTokenSource{};
 
-    Task::run(executor.get(), source.token(), std::chrono::seconds(5), std::chrono::seconds(1), [&finished, &start, &counter, &source] {
+    Task::run(executor.get(), source.token(), std::chrono::seconds(3), std::chrono::seconds(1), [&finished, &start, &counter, &source] {
         std::cout << "Hello World! " << std::endl;
 
         const auto end = std::chrono::steady_clock::now();
