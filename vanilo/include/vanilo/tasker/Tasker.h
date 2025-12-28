@@ -371,17 +371,36 @@ namespace vanilo::tasker {
 
             void scheduleNext()
             {
+                if (!_next) {
+                    return;
+                }
+
                 const auto executor = _next->_executor;
                 _next->_token = std::move(_token);
                 executor->submit(std::move(_next));
             }
 
-            TaskExecutor* _executor;
-            CancellationToken _token;
-            std::unique_ptr<ChainableTask> _next;
+            [[nodiscard]] bool hasNext() const
+            {
+                return _next != nullptr;
+            }
+
+            template <typename NextTask>
+            [[nodiscard]] NextTask nextTaskAs() const
+            {
+                return dynamic_cast<NextTask>(_next.get());
+            }
+
+            void throwIfCancellationRequested() const
+            {
+                _token.throwIfCancellationRequested();
+            }
 
           private:
             std::atomic_bool _cancelled{false};
+            TaskExecutor* _executor;
+            CancellationToken _token;
+            std::unique_ptr<ChainableTask> _next;
         };
 
         /**
@@ -615,7 +634,7 @@ namespace vanilo::tasker {
                     throw concurrent::OperationCanceledException();
                 }
 
-                this->_token.throwIfCancellationRequested();
+                this->throwIfCancellationRequested();
                 _promise.set_value(_task());
             }
 
@@ -626,7 +645,7 @@ namespace vanilo::tasker {
                     throw concurrent::OperationCanceledException();
                 }
 
-                this->_token.throwIfCancellationRequested();
+                this->throwIfCancellationRequested();
                 _promise.set_value(invoke(this->_param));
             }
 
@@ -685,7 +704,7 @@ namespace vanilo::tasker {
                     throw concurrent::OperationCanceledException();
                 }
 
-                this->_token.throwIfCancellationRequested();
+                this->throwIfCancellationRequested();
                 _task();
                 _promise.set_value();
             }
@@ -697,7 +716,7 @@ namespace vanilo::tasker {
                     throw concurrent::OperationCanceledException();
                 }
 
-                this->_token.throwIfCancellationRequested();
+                this->throwIfCancellationRequested();
                 invoke(this->_param);
                 _promise.set_value();
             }
@@ -743,8 +762,8 @@ namespace vanilo::tasker {
                         this->executeTask();
                     }
                     else {
-                        if (this->_next) {
-                            auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                        if (this->hasNext()) {
+                            auto next = this->template nextTaskAs<ParameterizedChainableTask<Result>*>();
                             next->setArgument(this->executeTask());
                             this->scheduleNext();
                         }
@@ -783,8 +802,8 @@ namespace vanilo::tasker {
                         this->executeTask();
                     }
                     else {
-                        if (this->_next) {
-                            auto next = dynamic_cast<ParameterizedChainableTask<Result>*>(this->_next.get());
+                        if (this->hasNext()) {
+                            auto next = this->template nextTaskAs<ParameterizedChainableTask<Result>*>();
                             next->setArgument(this->executeTask());
                             this->scheduleNext();
                         }
@@ -820,10 +839,7 @@ namespace vanilo::tasker {
             {
                 try {
                     this->executeTask();
-
-                    if (this->_next) {
-                        this->scheduleNext();
-                    }
+                    this->scheduleNext();
                 }
                 catch (concurrent::OperationCanceledException& ex) {
                     this->handleException(std::make_exception_ptr(ex));
@@ -852,10 +868,7 @@ namespace vanilo::tasker {
             {
                 try {
                     this->executeTask();
-
-                    if (this->_next) {
-                        this->scheduleNext();
-                    }
+                    this->scheduleNext();
                 }
                 catch (concurrent::OperationCanceledException& ex) {
                     this->handleException(std::make_exception_ptr(ex));

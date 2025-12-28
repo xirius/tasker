@@ -3,40 +3,58 @@
 
 #include <vanilo/tasker/Tasker.h>
 
-#include <queue>
+#include <set>
 
 namespace vanilo::tasker {
 
-    /// DelayedTask
+    /// ScheduledTask
     /// ============================================================================================
 
-    class DelayedTask final: public internal::ChainableTask
+    class ScheduledTask final: public internal::ChainableTask
     {
       public:
-        static std::unique_ptr<DelayedTask> create(TaskExecutor* executor, const std::chrono::steady_clock::time_point due)
-        {
-            return std::make_unique<DelayedTask>(executor, due);
-        }
+        using steady_clock = std::chrono::steady_clock;
+        using system_clock = std::chrono::system_clock;
+        using Recompute = std::function<steady_clock::time_point()>;
 
-        DelayedTask(TaskExecutor* executor, std::chrono::steady_clock::time_point due);
+        static std::unique_ptr<ScheduledTask> create(TaskExecutor* executor, steady_clock::time_point due);
+        static std::unique_ptr<ScheduledTask> create(
+            TaskExecutor* executor, steady_clock::time_point due, std::optional<steady_clock::duration> period);
+
+        ScheduledTask(TaskExecutor* executor, steady_clock::time_point due, std::uint64_t sequence);
 
         void run() override;
 
-        [[nodiscard]] std::chrono::steady_clock::time_point due() const
+        [[nodiscard]] steady_clock::time_point due() const
         {
             return _due;
         }
+
+        void setDue(steady_clock::time_point due);
 
         [[nodiscard]] std::uint64_t sequence() const
         {
             return _sequence;
         }
 
+        [[nodiscard]] bool isPeriodic() const
+        {
+            return _period.has_value();
+        }
+
+        [[nodiscard]] steady_clock::duration period() const
+        {
+            return _period.value();
+        }
+
+        void setPeriod(std::optional<steady_clock::duration> period);
+
       private:
         [[nodiscard]] bool isPromised() const noexcept override;
-        void handleException(std::exception_ptr exPtr) override;
+        void handleException([[maybe_unused]] std::exception_ptr exPtr) override;
 
-        std::chrono::steady_clock::time_point _due;
+        steady_clock::time_point _due;
+        std::optional<steady_clock::duration> _period;
         std::uint64_t _sequence; // tie-breaker for strict weak ordering
     };
 
@@ -45,7 +63,7 @@ namespace vanilo::tasker {
 
     struct TaskComparer
     {
-        bool operator()(const std::unique_ptr<DelayedTask>& a, const std::unique_ptr<DelayedTask>& b) const noexcept
+        bool operator()(const std::unique_ptr<ScheduledTask>& a, const std::unique_ptr<ScheduledTask>& b) const noexcept
         {
             if (a->due() == b->due())
                 return a->sequence() > b->sequence();
@@ -62,7 +80,7 @@ namespace vanilo::tasker {
         static std::unique_ptr<TaskScheduler> create();
 
         TaskScheduler();
-        ~TaskScheduler() override;
+        ~TaskScheduler() noexcept override;
 
         [[nodiscard]] size_t count() const override;
         void submit(std::unique_ptr<Task> task) override;
@@ -70,10 +88,17 @@ namespace vanilo::tasker {
       private:
         void worker();
 
+        // Extracted helpers to reduce method length/complexity (SonarQube)
+        bool shouldStop() const noexcept;
+        void waitForTasksOrStop(std::unique_lock<std::mutex>& lock);
+        bool waitUntilTopIsDue(std::unique_lock<std::mutex>& lock);
+        std::unique_ptr<ScheduledTask> popTopLocked();
+        void rescheduleIfNeeded(std::unique_ptr<ScheduledTask>& current);
+
         std::atomic_bool _stop{false};
-        std::mutex _mutex;
+        mutable std::mutex _mutex;
         std::condition_variable _condition;
-        std::priority_queue<std::unique_ptr<Task>, std::vector<std::unique_ptr<Task>>, TaskComparer> _queue;
+        std::multiset<std::unique_ptr<ScheduledTask>, TaskComparer> _queue;
         std::thread _worker;
     };
 

@@ -36,7 +36,7 @@ std::unique_ptr<internal::ChainableTask> internal::TaskManager::convertTask(
     std::unique_ptr<ChainableTask> task, const steady_clock::duration delay)
 {
     static auto scheduler = TaskScheduler::create();
-    auto delayedTask = DelayedTask::create(scheduler.get(), steady_clock::now() + delay);
+    auto delayedTask = ScheduledTask::create(scheduler.get(), steady_clock::now() + delay);
     delayedTask->setNext(std::move(task));
     return delayedTask;
 }
