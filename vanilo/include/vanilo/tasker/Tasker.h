@@ -38,6 +38,22 @@ namespace vanilo::tasker {
         static auto run(
             TaskExecutor* executor, CancellationToken token, std::chrono::duration<Rep, Period> delay, TaskFunc&& func, Args&&... args);
 
+        template <
+            class Rep1,
+            class Period1,
+            class Rep2,
+            class Period2,
+            typename TaskFunc,
+            typename... Args,
+            typename TaskBuilder = Builder<void, TaskFunc, void>>
+        static auto run(
+            TaskExecutor* executor,
+            CancellationToken token,
+            std::chrono::duration<Rep1, Period1> initialDelay,
+            std::chrono::duration<Rep2, Period2> interval,
+            TaskFunc&& func,
+            Args&&... args);
+
         virtual ~Task() = default;
 
         virtual void cancel() noexcept = 0;
@@ -166,10 +182,10 @@ namespace vanilo::tasker {
             std::unique_ptr<ChainableTask> _task;
         };
 
-        /// TaskManager declaration
+        /// TaskHelper declaration
         /// ========================================================================================
 
-        class TaskManager
+        class TaskHelper
         {
           public:
             using steady_clock = std::chrono::steady_clock;
@@ -179,12 +195,16 @@ namespace vanilo::tasker {
             static std::unique_ptr<ChainableTask> convertTask(
                 std::unique_ptr<ChainableTask> task, std::chrono::duration<Rep, Period> delay);
 
-            /*static std::unique_ptr<ChainableTask> createTask(
+            template <class Rep1, class Period1, class Rep2, class Period2>
+            static std::unique_ptr<ChainableTask> convertTask(
                 std::unique_ptr<ChainableTask> task,
-                steady_clock::time_point delay,
-                std::optional<steady_clock::duration> period = std::nullopt);*/
+                std::chrono::duration<Rep1, Period1> delay,
+                std::chrono::duration<Rep2, Period2> interval);
+
           private:
             static std::unique_ptr<ChainableTask> convertTask(std::unique_ptr<ChainableTask> task, steady_clock::duration delay);
+            static std::unique_ptr<ChainableTask> convertTask(
+                std::unique_ptr<ChainableTask> task, steady_clock::duration delay, steady_clock::duration interval);
         };
     } // namespace internal
 
@@ -294,7 +314,7 @@ namespace vanilo::tasker {
          * @tparam Callable The type of the task
          * @tparam Result The result type returned by the task
          * @tparam Arg The type of the argument which is taken by the task
-         * @tparam Promised Boolean flag to choose between normal and promised task
+         * @tparam Promised Boolean flag to choose between a normal and promised task
          */
         template <typename Callable, typename Result, typename Arg, bool Promised = false>
         class Invocable;
@@ -939,34 +959,24 @@ namespace vanilo::tasker {
             }
         }
 
-        /// TaskManager declaration
+        /// TaskHelper declaration
         /// ========================================================================================
 
         template <class Rep, class Period>
-        std::unique_ptr<ChainableTask> TaskManager::convertTask(
+        std::unique_ptr<ChainableTask> TaskHelper::convertTask(
             std::unique_ptr<ChainableTask> task, std::chrono::duration<Rep, Period> delay)
         {
             return convertTask(std::move(task), std::chrono::duration_cast<steady_clock::duration>(delay));
         }
 
-        /*
-        class TaskManager
+        template <class Rep1, class Period1, class Rep2, class Period2>
+        std::unique_ptr<ChainableTask> TaskHelper::convertTask(
+            std::unique_ptr<ChainableTask> task, std::chrono::duration<Rep1, Period1> delay, std::chrono::duration<Rep2, Period2> interval)
         {
-        public:
-            using steady_clock = std::chrono::steady_clock;
-            using system_clock = std::chrono::system_clock;
-
-            template <class Rep, class Period>
-            static std::unique_ptr<ChainableTask> convertTask(
-                std::unique_ptr<ChainableTask> task, std::chrono::duration<Rep, Period> delay);
-
-            static std::unique_ptr<ChainableTask> createTask(
-                std::unique_ptr<ChainableTask> task,
-                steady_clock::time_point delay,
-                std::optional<steady_clock::duration> period = std::nullopt);
-        };
-        */
-
+            return convertTask(
+                std::move(task), std::chrono::duration_cast<steady_clock::duration>(delay),
+                std::chrono::duration_cast<steady_clock::duration>(interval));
+        }
     } // namespace internal
 
     /// Task::Builder implementation
@@ -1067,7 +1077,32 @@ namespace vanilo::tasker {
         auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, IsMember, HasToken>::createInvocable(
             executor, std::move(token), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
         auto last = invocable.get();
-        auto scheduled = internal::TaskManager::convertTask(std::move(invocable), delay);
+        auto scheduled = internal::TaskHelper::convertTask(std::move(invocable), delay);
+        auto current = scheduled.get();
+
+        return Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(scheduled), current, last};
+    }
+
+    template <class Rep1, class Period1, class Rep2, class Period2, typename TaskFunc, typename... Args, typename TaskBuilder>
+    auto Task::run(
+        TaskExecutor* executor,
+        CancellationToken token,
+        std::chrono::duration<Rep1, Period1> initialDelay,
+        std::chrono::duration<Rep2, Period2> interval,
+        TaskFunc&& func,
+        Args&&... args)
+    {
+        if (!interval.count()) {
+            return Task::run(executor, token, initialDelay, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        }
+
+        constexpr bool HasToken = std::is_same_v<std::decay_t<typename TaskBuilder::FirstArg>, CancellationToken>;
+        constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
+
+        auto invocable = internal::BuilderHelper<typename TaskBuilder::ResultType, void, IsMember, HasToken>::createInvocable(
+            executor, std::move(token), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        auto last = invocable.get();
+        auto scheduled = internal::TaskHelper::convertTask(std::move(invocable), initialDelay, interval);
         auto current = scheduled.get();
 
         return Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(scheduled), current, last};

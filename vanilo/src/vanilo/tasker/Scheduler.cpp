@@ -21,10 +21,10 @@ std::unique_ptr<ScheduledTask> ScheduledTask::create(TaskExecutor* executor, ste
 }
 
 std::unique_ptr<ScheduledTask> ScheduledTask::create(
-    TaskExecutor* executor, steady_clock::time_point due, const std::optional<steady_clock::duration> period)
+    TaskExecutor* executor, steady_clock::time_point due, const std::optional<steady_clock::duration> interval)
 {
     auto task = std::make_unique<ScheduledTask>(executor, due, nextSequence());
-    task->setPeriod(period);
+    task->setInterval(interval);
     return task;
 }
 
@@ -43,9 +43,9 @@ void ScheduledTask::setDue(const steady_clock::time_point due)
     _due = due;
 }
 
-void ScheduledTask::setPeriod(const std::optional<steady_clock::duration> period)
+void ScheduledTask::setInterval(const std::optional<steady_clock::duration> interval)
 {
-    _period = period;
+    _interval = interval;
 }
 
 [[nodiscard]] bool ScheduledTask::isPromised() const noexcept
@@ -90,11 +90,11 @@ void TaskScheduler::submit(std::unique_ptr<Task> task)
     std::unique_ptr<ScheduledTask> scheduled;
 
     if (const auto scheduledTask = dynamic_cast<ScheduledTask*>(task.get())) {
-        (void)task.release();
+        [[maybe_unused]] auto unused = task.release();
         scheduled.reset(scheduledTask);
     }
     else if (const auto chainableTask = dynamic_cast<internal::ChainableTask*>(task.get())) {
-        (void)task.release();
+        [[maybe_unused]] auto unused = task.release();
         scheduled = ScheduledTask::create(this, std::chrono::steady_clock::now());
         std::unique_ptr<internal::ChainableTask> chainable;
         chainable.reset(chainableTask);
@@ -183,13 +183,13 @@ void TaskScheduler::rescheduleIfNeeded(std::unique_ptr<ScheduledTask>& current)
     bool reschedule = false;
     if (current->isPeriodic()) {
         // drift-free: step forward from prior 'due'
-        current->setDue(current->due() + current->period());
+        current->setDue(current->due() + current->interval());
 
         // catch up if we fell behind
         const auto now = std::chrono::steady_clock::now();
 
         while (current->due() <= now) {
-            current->setDue(current->due() + current->period());
+            current->setDue(current->due() + current->interval());
         }
 
         reschedule = true;

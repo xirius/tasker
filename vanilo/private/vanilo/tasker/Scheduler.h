@@ -19,7 +19,7 @@ namespace vanilo::tasker {
 
         static std::unique_ptr<ScheduledTask> create(TaskExecutor* executor, steady_clock::time_point due);
         static std::unique_ptr<ScheduledTask> create(
-            TaskExecutor* executor, steady_clock::time_point due, std::optional<steady_clock::duration> period);
+            TaskExecutor* executor, steady_clock::time_point due, std::optional<steady_clock::duration> interval);
 
         ScheduledTask(TaskExecutor* executor, steady_clock::time_point due, std::uint64_t sequence);
 
@@ -39,22 +39,22 @@ namespace vanilo::tasker {
 
         [[nodiscard]] bool isPeriodic() const
         {
-            return _period.has_value();
+            return _interval.has_value();
         }
 
-        [[nodiscard]] steady_clock::duration period() const
+        [[nodiscard]] steady_clock::duration interval() const
         {
-            return _period.value();
+            return _interval.value();
         }
 
-        void setPeriod(std::optional<steady_clock::duration> period);
+        void setInterval(std::optional<steady_clock::duration> interval);
 
       private:
         [[nodiscard]] bool isPromised() const noexcept override;
         void handleException([[maybe_unused]] std::exception_ptr exPtr) override;
 
         steady_clock::time_point _due;
-        std::optional<steady_clock::duration> _period;
+        std::optional<steady_clock::duration> _interval;
         std::uint64_t _sequence; // tie-breaker for strict weak ordering
     };
 
@@ -88,7 +88,6 @@ namespace vanilo::tasker {
       private:
         void worker();
 
-        // Extracted helpers to reduce method length/complexity (SonarQube)
         bool shouldStop() const noexcept;
         void waitForTasksOrStop(std::unique_lock<std::mutex>& lock);
         bool waitUntilTopIsDue(std::unique_lock<std::mutex>& lock);
