@@ -133,10 +133,11 @@ void TaskScheduler::submit(std::unique_ptr<Task> task)
     }
     else {
         // Wrap a generic Task into a chainable adapter so it can be scheduled and executed
-        auto adapter = std::make_unique<RunTaskAdapter>(this, std::move(task));
+        auto adapter = std::make_unique<RunTaskAdapter>(task->, std::move(task));
         scheduled = ScheduledTask::create(this, std::chrono::steady_clock::now());
         scheduled->setNext(std::move(adapter));
     }
+
     {
         std::scoped_lock lock(_mutex);
         _queue.insert(std::move(scheduled));
