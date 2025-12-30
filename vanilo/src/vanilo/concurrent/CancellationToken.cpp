@@ -88,7 +88,7 @@ struct CancellationToken::Impl
             std::lock_guard lock{mutex};
             snapshot.reserve(subscriptions.size());
 
-            for (auto& subscription : subscriptions) {
+            for (auto const& subscription : subscriptions) {
                 if (auto callback = subscription.lock()) {
                     snapshot.push_back(callback);
                 }
@@ -147,7 +147,7 @@ struct CancellationToken::Impl
                 slotIndex -= subscriptionsSize; // wrap
             }
 
-            if (auto& slot = subscriptions[slotIndex]; slot.expired()) {
+            if (auto const& slot = subscriptions[slotIndex]; slot.expired()) {
                 if (chosen == static_cast<size_t>(-1)) {
                     chosen = slotIndex; // use this one for the current insertion
                 }
@@ -165,7 +165,7 @@ struct CancellationToken::Impl
 
         // 3) Full scan (once in a while) and collect some free slots
         for (size_t i = 0; i < subscriptionsSize; ++i) {
-            if (auto& slot = subscriptions[i]; slot.expired()) {
+            if (auto const& slot = subscriptions[i]; slot.expired()) {
                 if (chosen == static_cast<size_t>(-1)) {
                     chosen = i;
                 }
@@ -264,12 +264,14 @@ CancellationTokenSource::CancellationTokenSource(): _impl{std::make_shared<Cance
 
 void CancellationTokenSource::cancel() const noexcept
 {
-    _impl->cancel();
+    if (_impl) {
+        _impl->cancel();
+    }
 }
 
 bool CancellationTokenSource::isCancellationRequested() const noexcept
 {
-    return _impl->isCanceled();
+    return _impl ? _impl->isCanceled() : false;
 }
 
 CancellationToken CancellationTokenSource::token() const noexcept
