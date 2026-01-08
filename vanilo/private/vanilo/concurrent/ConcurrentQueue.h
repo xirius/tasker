@@ -23,8 +23,8 @@ namespace vanilo::concurrent {
 
         ~ConcurrentQueue()
         {
-            if (_valid.load(std::memory_order_acquire)) {
-                invalidate();
+            if (!_closed.load(std::memory_order_acquire)) {
+                close();
             }
         }
 
@@ -50,7 +50,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (!_valid.load(std::memory_order_acquire)) {
+            if (_closed.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -68,7 +68,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (!_valid.load(std::memory_order_acquire)) {
+            if (_closed.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -86,7 +86,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (!_valid.load(std::memory_order_acquire)) {
+            if (_closed.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -104,7 +104,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (_queue.empty() || !_valid.load(std::memory_order_acquire)) {
+            if (_queue.empty() || _closed.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -126,9 +126,9 @@ namespace vanilo::concurrent {
 
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this] { return !_queue.empty() || !_valid.load(std::memory_order_acquire); });
+            _condition.wait(lock, [this] { return !_queue.empty() || _closed.load(std::memory_order_acquire); });
 
-            if (!_valid.load(std::memory_order_acquire)) {
+            if (_closed.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -149,6 +149,9 @@ namespace vanilo::concurrent {
          */
         bool waitDequeue(const CancellationToken& token, T& out)
         {
+            // token.subscribe must be called outside the std::unique_lock lock{_mutex}.
+            // If token.subscribe is ever moved inside the lock to "protect" it, a deadlock will occur
+            // because the callback would attempt to acquire the same mutex recursively.
             bool canceled = false;
             auto subscription = token.subscribe([this, &canceled] {
                 std::unique_lock lock{_mutex};
@@ -159,9 +162,9 @@ namespace vanilo::concurrent {
             std::unique_lock lock{_mutex};
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || !_valid.load(std::memory_order_acquire); });
+            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || _closed.load(std::memory_order_acquire); });
 
-            if (token.isCancellationRequested() || !_valid.load(std::memory_order_acquire)) {
+            if (token.isCancellationRequested() || _closed.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -202,17 +205,17 @@ namespace vanilo::concurrent {
         }
 
         /**
-         * Invalidates the queue. Used to ensure no conditions are being waited on in the waitDequeue method when
+         * Closes the queue. Used to ensure no conditions are being waited on in the waitDequeue method when
          * a thread or the application is trying to exit. It is recommended to not use the queue after this method
-         * has been called, as further operations will return false.
+         * has been called, as further operations will return false or fail.
          * @return The list of remaining elements in the queue.
          */
-        std::vector<T> invalidate()
+        std::vector<T> close()
         {
             std::lock_guard lock{_mutex};
             std::vector<T> remaining;
 
-            if (!_valid.load(std::memory_order_acquire)) {
+            if (_closed.load(std::memory_order_acquire)) {
                 return remaining;
             }
 
@@ -220,18 +223,18 @@ namespace vanilo::concurrent {
             std::move(_queue.begin(), _queue.end(), std::back_inserter(remaining));
             _queue.clear();
 
-            _valid.store(false, std::memory_order_release);
+            _closed.store(true, std::memory_order_release);
             _condition.notify_all();
             return remaining;
         }
 
         /**
-         * Returns whether the queue is valid.
-         * @return True if the queue is valid, false otherwise.
+         * Returns whether the queue is closed.
+         * @return True if the queue is closed, false otherwise.
          */
-        bool isValid() const
+        bool isClosed() const
         {
-            return _valid.load(std::memory_order_acquire);
+            return _closed.load(std::memory_order_acquire);
         }
 
         /**
@@ -250,7 +253,7 @@ namespace vanilo::concurrent {
         }
 
       private:
-        std::atomic_bool _valid{true};
+        std::atomic_bool _closed{false};
         std::condition_variable _condition;
         mutable std::mutex _mutex;
         std::deque<T> _queue;

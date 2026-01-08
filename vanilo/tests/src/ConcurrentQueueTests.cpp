@@ -18,7 +18,7 @@ TEST_CASE("ConcurrentQueue basic operations", "[concurrent][ConcurrentQueue]")
     {
         REQUIRE(queue.empty());
         REQUIRE(queue.size() == 0);
-        REQUIRE(queue.isValid());
+        REQUIRE_FALSE(queue.isClosed());
     }
 
     SECTION("Enqueue and tryDequeue")
@@ -39,7 +39,7 @@ TEST_CASE("ConcurrentQueue basic operations", "[concurrent][ConcurrentQueue]")
 
     SECTION("waitDequeue")
     {
-        std::thread producer([&queue]() {
+        std::thread producer([&queue] {
             std::this_thread::sleep_for(50ms);
             queue.enqueue(42);
         });
@@ -74,7 +74,7 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
 
     SECTION("waitDequeue with token - canceled during wait")
     {
-        std::thread canceler([&cts]() {
+        std::thread canceler([&cts] {
             std::this_thread::sleep_for(50ms);
             cts.cancel();
         });
@@ -96,16 +96,16 @@ TEST_CASE("ConcurrentQueue invalidation", "[concurrent][ConcurrentQueue]")
     {
         queue.enqueue(1);
         queue.enqueue(2);
-        auto remaining = queue.invalidate();
+        auto remaining = queue.close();
         REQUIRE(remaining.size() == 2);
         REQUIRE(remaining[0] == 1);
         REQUIRE(remaining[1] == 2);
-        REQUIRE_FALSE(queue.isValid());
+        REQUIRE(queue.isClosed());
     }
 
     SECTION("enqueue after invalidate fails")
     {
-        queue.invalidate();
+        queue.close();
         REQUIRE_FALSE(queue.enqueue(1));
         REQUIRE(queue.empty());
     }
@@ -113,7 +113,7 @@ TEST_CASE("ConcurrentQueue invalidation", "[concurrent][ConcurrentQueue]")
     SECTION("tryDequeue after invalidate fails")
     {
         queue.enqueue(1);
-        queue.invalidate();
+        queue.close();
         int val;
         REQUIRE_FALSE(queue.tryDequeue(val));
     }
@@ -122,7 +122,7 @@ TEST_CASE("ConcurrentQueue invalidation", "[concurrent][ConcurrentQueue]")
     {
         std::thread invalidator([&queue]() {
             std::this_thread::sleep_for(50ms);
-            queue.invalidate();
+            queue.close();
         });
 
         int val;
@@ -167,17 +167,17 @@ TEST_CASE("ConcurrentQueue concurrency", "[concurrent][ConcurrentQueue]")
     }
 
     for (auto& t : producers) t.join();
+
     // After producers are done, we might need to invalidate to wake up consumers if they are stuck in waitDequeue
     // but here they should finish because we know how many items to expect.
+    for (auto& t : consumers) t.join();
+
+    REQUIRE(totalConsumed == numProducers * itemsPerProducer);
 
     int expected_sum = 0;
     for (int i = 0; i < numProducers * itemsPerProducer; ++i) {
         expected_sum += i;
     }
-
-    for (auto& t : consumers) t.join();
-
-    REQUIRE(totalConsumed == numProducers * itemsPerProducer);
 
     REQUIRE(sumConsumed == expected_sum);
 }
@@ -193,7 +193,7 @@ TEST_CASE("ConcurrentQueue destruction while waiting", "[concurrent][ConcurrentQ
     std::thread consumer([queue, &thread_started, &wait_finished]() {
         thread_started = true;
         int val;
-        bool result = queue->waitDequeue(val);
+        const bool result = queue->waitDequeue(val);
         wait_finished = true;
         (void)result;
     });
@@ -201,7 +201,7 @@ TEST_CASE("ConcurrentQueue destruction while waiting", "[concurrent][ConcurrentQ
     while (!thread_started) std::this_thread::yield();
     std::this_thread::sleep_for(10ms); // Give it some time to actually enter wait()
 
-    delete queue; // Should call invalidate() which should wake up the consumer
+    delete queue; // Should call close() which should wake up the consumer
 
     consumer.join();
     REQUIRE(wait_finished);
