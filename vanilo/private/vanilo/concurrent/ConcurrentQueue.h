@@ -10,6 +10,7 @@
 #include <mutex>
 
 namespace vanilo::concurrent {
+
     template <typename T>
     class ConcurrentQueue
     {
@@ -22,7 +23,7 @@ namespace vanilo::concurrent {
 
         ~ConcurrentQueue()
         {
-            if (_valid) {
+            if (_valid.load(std::memory_order_acquire)) {
                 invalidate();
             }
         }
@@ -45,34 +46,53 @@ namespace vanilo::concurrent {
          * @return The value or reference (if any).
          */
         template <typename... Args>
-        auto enqueue(Args&&... args)
+        bool enqueue(Args&&... args)
         {
             std::lock_guard lock{_mutex};
-            auto result = _queue.emplace(std::forward<Args>(args)...);
+
+            if (!_valid.load(std::memory_order_acquire)) {
+                return false;
+            }
+
+            _queue.emplace_back(std::forward<Args>(args)...);
             _condition.notify_one();
-            return result;
+            return true;
         }
 
         /**
          * Adds the given element value to the end of the queue.
          * @param value The value of the element to push.
+         * @return True if the element was added; false if the queue is invalid.
          */
-        void enqueue(const T& value)
+        bool enqueue(const T& value)
         {
             std::lock_guard lock{_mutex};
-            _queue.push(value);
+
+            if (!_valid.load(std::memory_order_acquire)) {
+                return false;
+            }
+
+            _queue.push_back(value);
             _condition.notify_one();
+            return true;
         }
 
         /**
          * Adds the given element value to the end of the queue.
          * @param value The value of the element to push.
+         * @return True if the element was added; false if the queue is invalid.
          */
-        void enqueue(T&& value)
+        bool enqueue(T&& value)
         {
             std::lock_guard lock{_mutex};
+
+            if (!_valid.load(std::memory_order_acquire)) {
+                return false;
+            }
+
             _queue.push_back(std::move(value));
             _condition.notify_one();
+            return true;
         }
 
         /**
@@ -84,7 +104,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (_queue.empty() || !_valid) {
+            if (_queue.empty() || !_valid.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -106,9 +126,9 @@ namespace vanilo::concurrent {
 
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this] { return !_queue.empty() || !_valid; });
+            _condition.wait(lock, [this] { return !_queue.empty() || !_valid.load(std::memory_order_acquire); });
 
-            if (!_valid) {
+            if (!_valid.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -138,9 +158,9 @@ namespace vanilo::concurrent {
             std::unique_lock lock{_mutex};
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || !_valid; });
+            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || !_valid.load(std::memory_order_acquire); });
 
-            if (token.isCancellationRequested() || !_valid) {
+            if (token.isCancellationRequested() || !_valid.load(std::memory_order_acquire)) {
                 return false;
             }
 
@@ -166,11 +186,7 @@ namespace vanilo::concurrent {
         void clear()
         {
             std::lock_guard lock{_mutex};
-
-            while (!_queue.empty()) {
-                _queue.pop_front();
-            }
-
+            _queue.clear();
             _condition.notify_all();
         }
 
@@ -195,12 +211,15 @@ namespace vanilo::concurrent {
             std::lock_guard lock{_mutex};
             std::vector<T> remaining;
 
-            while (!_queue.empty()) {
-                remaining.push_back(std::move(_queue.front()));
-                _queue.pop_front();
+            if (!_valid.load(std::memory_order_acquire)) {
+                return remaining;
             }
 
-            _valid = false;
+            remaining.reserve(_queue.size());
+            std::move(_queue.begin(), _queue.end(), std::back_inserter(remaining));
+            _queue.clear();
+
+            _valid.store(false, std::memory_order_release);
             _condition.notify_all();
             return remaining;
         }
@@ -211,7 +230,7 @@ namespace vanilo::concurrent {
          */
         bool isValid() const
         {
-            return _valid.load();
+            return _valid.load(std::memory_order_acquire);
         }
 
         /**
