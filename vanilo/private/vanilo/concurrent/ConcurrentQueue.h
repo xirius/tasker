@@ -29,9 +29,9 @@ namespace vanilo::concurrent {
         }
 
         /**
-         * Checks for the existence of the value in the queue.
-         * @param predicate The predicate to check for the existence.
-         * @return True if the element was found; false otherwise.
+         * Checks if an element matching the predicate exists in the queue.
+         * @param predicate The predicate to check for existence.
+         * @return True if a matching element was found; false otherwise.
          */
         bool contains(const std::function<bool(const T&)>& predicate) const
         {
@@ -43,7 +43,7 @@ namespace vanilo::concurrent {
          * Adds a new element to the end of the queue. The element is constructed in-place.
          * @tparam Args Type of the arguments.
          * @param args  Arguments to forward to the constructor of the element
-         * @return The value or reference (if any).
+         * @return True if the element was added; false if the queue is invalid.
          */
         template <typename... Args>
         bool enqueue(Args&&... args)
@@ -116,9 +116,9 @@ namespace vanilo::concurrent {
 
         /**
          * Retrieves the first element from the queue (blocking). The element is removed from the queue.
-         * This method blocks until an element is available or unless clear is called or the instance is destructed.
+         * This method blocks until an element is available, the queue is invalidated, or the instance is destructed.
          * @param out The retrieved element from the queue.
-         * @return True if an element was successfully written to the out parameter, false otherwise.
+         * @return True if an element was successfully written to the out parameter, false if the queue is invalid.
          */
         bool waitDequeue(T& out)
         {
@@ -140,11 +140,12 @@ namespace vanilo::concurrent {
 
         /**
          * Retrieves the first element from the queue (blocking). The element is removed from the queue.
-         * This method blocks until an element is available or unless clear is called, the cancellation token is in the
-         * canceled state, or the instance is destructed.
+         * This method blocks until an element is available, the queue is invalidated, the cancellation token is
+         * in the canceled state, or the instance is destructed.
          * @param token The cancellation token.
          * @param out The retrieved element from the queue.
-         * @return True if an element was successfully written to the out parameter, false otherwise.
+         * @return True if an element was successfully written to the out parameter, false if the queue is invalid or
+         *         cancellation was requested.
          */
         bool waitDequeue(const CancellationToken& token, T& out)
         {
@@ -171,8 +172,8 @@ namespace vanilo::concurrent {
         }
 
         /**
-         * Checks if the queue has no elements.
-         * @return True if the queue has no elements, false otherwise.
+         * Checks if the queue is empty.
+         * @return True if the queue is empty, false otherwise.
          */
         bool empty() const
         {
@@ -181,7 +182,7 @@ namespace vanilo::concurrent {
         }
 
         /**
-         * Removes all the elements from the queue.
+         * Removes all elements from the queue.
          */
         void clear()
         {
@@ -202,8 +203,8 @@ namespace vanilo::concurrent {
 
         /**
          * Invalidates the queue. Used to ensure no conditions are being waited on in the waitDequeue method when
-         * a thread or the application is trying to exit. It is an undefined behaviour to continue use the queue
-         * after this method has been called.
+         * a thread or the application is trying to exit. It is recommended to not use the queue after this method
+         * has been called, as further operations will return false.
          * @return The list of remaining elements in the queue.
          */
         std::vector<T> invalidate()
@@ -234,10 +235,10 @@ namespace vanilo::concurrent {
         }
 
         /**
-         * Returns the list of the transformed items of the queue.
-         * @tparam TOut The type of the list elements
-         * @param selector The transformation function on the queue elements.
-         * @return The list of the transformed items of the queue.
+         * Returns a list of the transformed items from the queue.
+         * @tparam TOut The type of the resulting list elements.
+         * @param selector The transformation function to apply to each element.
+         * @return A vector containing the transformed items.
          */
         template <typename TOut>
         std::vector<TOut> toList(const std::function<TOut(const T&)>& selector) const
@@ -254,6 +255,7 @@ namespace vanilo::concurrent {
         mutable std::mutex _mutex;
         std::deque<T> _queue;
     };
+
 } // namespace vanilo::concurrent
 
 #endif // INC_D8C0265AC7204A5F8B06B620B9F01B70
