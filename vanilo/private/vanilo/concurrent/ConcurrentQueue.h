@@ -116,9 +116,9 @@ namespace vanilo::concurrent {
 
         /**
          * Retrieves the first element from the queue (blocking). The element is removed from the queue.
-         * This method blocks until an element is available, the queue is invalidated, or the instance is destructed.
+         * This method blocks until an element is available or the queue is closed.
          * @param out The retrieved element from the queue.
-         * @return True if an element was successfully written to the out parameter, false if the queue is invalid.
+         * @return True if an element was successfully written to the out parameter; false if the queue is closed.
          */
         bool waitDequeue(T& out)
         {
@@ -140,12 +140,18 @@ namespace vanilo::concurrent {
 
         /**
          * Retrieves the first element from the queue (blocking). The element is removed from the queue.
-         * This method blocks until an element is available, the queue is invalidated, the cancellation token is
-         * in the canceled state, or the instance is destructed.
+         * This method blocks until an element is available, the queue is closed, or the cancellation token is
+         * in the canceled state.
+         *
+         * If the cancellation token is in the canceled state but the queue is not empty, an element
+         * will be retrieved and the method will return true.
+         *
+         * If the queue is closed, it is always empty (as close() drains the queue) and the method will return false.
+         *
          * @param token The cancellation token.
          * @param out The retrieved element from the queue.
-         * @return True if an element was successfully written to the out parameter, false if the queue is invalid or
-         *         cancellation was requested.
+         * @return True if an element was successfully written to the out parameter; false if the queue is closed
+         *         or cancellation was requested and the queue is empty.
          */
         bool waitDequeue(const CancellationToken& token, T& out)
         {
@@ -164,7 +170,7 @@ namespace vanilo::concurrent {
             // but empty queue will not proceed, so only need to check for validity before proceeding.
             _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || _closed.load(std::memory_order_acquire); });
 
-            if (token.isCancellationRequested() || _closed.load(std::memory_order_acquire)) {
+            if (_queue.empty() && (canceled || _closed.load(std::memory_order_acquire))) {
                 return false;
             }
 

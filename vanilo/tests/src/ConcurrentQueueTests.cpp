@@ -65,10 +65,13 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
     ConcurrentQueue<int> queue;
     CancellationTokenSource cts;
 
-    SECTION("waitDequeue with token - pre-canceled")
+    SECTION("waitDequeue with token - pre-canceled but not empty")
     {
+        queue.enqueue(10);
         cts.cancel();
         int val;
+        REQUIRE(queue.waitDequeue(cts.token(), val));
+        REQUIRE(val == 10);
         REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
     }
 
@@ -85,6 +88,37 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
         auto end = std::chrono::steady_clock::now();
         REQUIRE(end - start >= 50ms);
         canceler.join();
+    }
+
+    SECTION("waitDequeue with token - already closed")
+    {
+        queue.enqueue(1);
+        queue.close();
+        int val;
+        REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
+    }
+
+    SECTION("waitDequeue with token - closed during wait")
+    {
+        std::thread closer([&queue] {
+            std::this_thread::sleep_for(50ms);
+            queue.close();
+        });
+
+        int val;
+        auto start = std::chrono::steady_clock::now();
+        REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
+        auto end = std::chrono::steady_clock::now();
+        REQUIRE(end - start >= 50ms);
+        closer.join();
+    }
+
+    SECTION("waitDequeue with token - both canceled and closed")
+    {
+        queue.close();
+        cts.cancel();
+        int val;
+        REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
     }
 }
 
