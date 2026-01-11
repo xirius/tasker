@@ -244,7 +244,7 @@ bool TaskScheduler::waitUntilTopIsDue(std::unique_lock<std::mutex>& lock)
 
 std::unique_ptr<ScheduledTask> TaskScheduler::popTopLocked()
 {
-    // pre: lock is held, queue is not empty
+    // pre: the lock is held, the queue is not empty
     auto nodeHandle = _queue.extract(_queue.begin());
     return std::move(nodeHandle.value());
 }

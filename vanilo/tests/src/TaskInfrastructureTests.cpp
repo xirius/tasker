@@ -165,7 +165,9 @@ TEST_CASE("Periodic task executes multiple times with chain", "[task][periodic]"
     const vanilo::concurrent::CancellationTokenSource tokenSource;
     std::atomic_int counter{0};
 
-    Task::run(executor.get(), tokenSource.token(), 10ms, 30ms, [&] { return 1; }).then(executor.get(), [&](int val) { counter += val; });
+    Task::run(executor.get(), tokenSource.token(), 10ms, 30ms, [] { return 1; }).then(executor.get(), [&counter](const int val) {
+        counter += val;
+    });
 
     std::this_thread::sleep_for(150ms);
     tokenSource.cancel();
@@ -182,7 +184,7 @@ TEST_CASE("Periodic task is canceled by CancellationToken", "[task][periodic][ca
     const vanilo::concurrent::CancellationTokenSource tokenSource;
     std::atomic_int counter{0};
 
-    Task::run(executor.get(), tokenSource.token(), 10ms, 20ms, [&] { counter++; });
+    Task::run(executor.get(), tokenSource.token(), 10ms, 20ms, [&counter] { ++counter; });
 
     std::this_thread::sleep_for(50ms);
     // Should have run ~3 times (10, 30, 50)

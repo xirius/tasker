@@ -63,7 +63,7 @@ namespace vanilo::tasker {
     /// TaskComparer
     /// ============================================================================================
 
-    struct TaskComparer
+    struct TaskDueTimeComparator
     {
         bool operator()(const std::unique_ptr<ScheduledTask>& a, const std::unique_ptr<ScheduledTask>& b) const noexcept
         {
@@ -100,7 +100,7 @@ namespace vanilo::tasker {
         std::atomic_bool _stop{false};
         mutable std::mutex _mutex;
         std::condition_variable _condition;
-        std::multiset<std::unique_ptr<ScheduledTask>, TaskComparer> _queue;
+        std::multiset<std::unique_ptr<ScheduledTask>, TaskDueTimeComparator> _queue;
         std::thread _worker;
     };
 
