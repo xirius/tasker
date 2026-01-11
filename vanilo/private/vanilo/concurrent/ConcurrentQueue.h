@@ -4,7 +4,6 @@
 #include <vanilo/concurrent/CancellationToken.h>
 
 #include <algorithm>
-#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -23,7 +22,7 @@ namespace vanilo::concurrent {
 
         ~ConcurrentQueue()
         {
-            if (!_closed.load(std::memory_order_acquire)) {
+            if (!_closed) {
                 close();
             }
         }
@@ -50,7 +49,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (_closed.load(std::memory_order_acquire)) {
+            if (_closed) {
                 return false;
             }
 
@@ -68,7 +67,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (_closed.load(std::memory_order_acquire)) {
+            if (_closed) {
                 return false;
             }
 
@@ -86,7 +85,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (_closed.load(std::memory_order_acquire)) {
+            if (_closed) {
                 return false;
             }
 
@@ -104,7 +103,7 @@ namespace vanilo::concurrent {
         {
             std::lock_guard lock{_mutex};
 
-            if (_queue.empty() || _closed.load(std::memory_order_acquire)) {
+            if (_queue.empty() || _closed) {
                 return false;
             }
 
@@ -126,9 +125,9 @@ namespace vanilo::concurrent {
 
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this] { return !_queue.empty() || _closed.load(std::memory_order_acquire); });
+            _condition.wait(lock, [this] { return !_queue.empty() || _closed; });
 
-            if (_closed.load(std::memory_order_acquire)) {
+            if (_closed) {
                 return false;
             }
 
@@ -168,9 +167,9 @@ namespace vanilo::concurrent {
             std::unique_lock lock{_mutex};
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || _closed.load(std::memory_order_acquire); });
+            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || _closed; });
 
-            if (_queue.empty() && (canceled || _closed.load(std::memory_order_acquire))) {
+            if (_queue.empty() && (canceled || _closed)) {
                 return false;
             }
 
@@ -221,7 +220,7 @@ namespace vanilo::concurrent {
             std::lock_guard lock{_mutex};
             std::vector<T> remaining;
 
-            if (_closed.load(std::memory_order_acquire)) {
+            if (_closed) {
                 return remaining;
             }
 
@@ -229,7 +228,7 @@ namespace vanilo::concurrent {
             std::move(_queue.begin(), _queue.end(), std::back_inserter(remaining));
             _queue.clear();
 
-            _closed.store(true, std::memory_order_release);
+            _closed = true;
             _condition.notify_all();
             return remaining;
         }
@@ -240,7 +239,8 @@ namespace vanilo::concurrent {
          */
         bool isClosed() const
         {
-            return _closed.load(std::memory_order_acquire);
+            std::lock_guard lock{_mutex};
+            return _closed;
         }
 
         /**
@@ -259,7 +259,7 @@ namespace vanilo::concurrent {
         }
 
       private:
-        std::atomic_bool _closed{false};
+        bool _closed{false};
         std::condition_variable _condition;
         mutable std::mutex _mutex;
         std::deque<T> _queue;
