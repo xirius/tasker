@@ -14,7 +14,7 @@ check_system("linux" IS_LINUX)
 check_system("windows" IS_WINDOWS)
 
 # Build types
-set(VALID_BUILD_TYPES "Release" "Debug" "MinSizeRel" "RelWithDebInfo")
+set(VALID_BUILD_TYPES "Release" "Debug" "MinSizeRel" "RelWithDebInfo" "Asan" "Tsan")
 
 if(NOT CMAKE_CONFIGURATION_TYPES)
     if("${CMAKE_BUILD_TYPE}" STREQUAL "")
