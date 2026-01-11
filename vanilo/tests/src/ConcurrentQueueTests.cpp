@@ -220,11 +220,11 @@ TEST_CASE("ConcurrentQueue destruction while waiting", "[concurrent][ConcurrentQ
 {
     // This test is tricky because it involves intentional race conditions.
     // The goal is to see if it crashes.
-    auto* queue = new ConcurrentQueue<int>();
+    auto queue = std::make_unique<ConcurrentQueue<int>>();
     std::atomic<bool> thread_started{false};
     std::atomic<bool> wait_finished{false};
 
-    std::thread consumer([queue, &thread_started, &wait_finished]() {
+    std::thread consumer([&queue, &thread_started, &wait_finished]() {
         thread_started = true;
         int val;
         const bool result = queue->waitDequeue(val);
@@ -235,10 +235,37 @@ TEST_CASE("ConcurrentQueue destruction while waiting", "[concurrent][ConcurrentQ
     while (!thread_started) std::this_thread::yield();
     std::this_thread::sleep_for(10ms); // Give it some time to actually enter wait()
 
-    delete queue; // Should call close() which should wake up the consumer
+    queue.reset(); // Should call close() which should wake up the consumer
 
     consumer.join();
     REQUIRE(wait_finished);
+}
+
+TEST_CASE("ConcurrentQueue destruction with many waiters", "[concurrent][ConcurrentQueue]")
+{
+    // Stress test for destruction safety
+    constexpr int numWaiters = 50;
+    auto queue = std::make_unique<ConcurrentQueue<int>>();
+    std::vector<std::thread> waiters;
+    std::atomic<int> completedWaiters{0};
+
+    for (int i = 0; i < numWaiters; ++i) {
+        waiters.emplace_back([&queue, &completedWaiters] {
+            // Should return false when the queue is destroyed/closed
+            if (int val; !queue->waitDequeue(val)) {
+                ++completedWaiters;
+            }
+        });
+    }
+
+    // Give time for threads to block
+    std::this_thread::sleep_for(50ms);
+
+    // Destroy!
+    queue.reset();
+
+    for (auto& t : waiters) t.join();
+    REQUIRE(completedWaiters == numWaiters);
 }
 
 TEST_CASE("ConcurrentQueue helper methods", "[concurrent][ConcurrentQueue]")

@@ -4,9 +4,11 @@
 #include <vanilo/concurrent/CancellationToken.h>
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <thread>
 
 namespace vanilo::concurrent {
 
@@ -22,8 +24,9 @@ namespace vanilo::concurrent {
 
         ~ConcurrentQueue()
         {
-            if (!_closed) {
-                close();
+            close();
+            while (_waiters.load(std::memory_order_acquire) > 0) {
+                std::this_thread::yield();
             }
         }
 
@@ -121,6 +124,7 @@ namespace vanilo::concurrent {
          */
         bool waitDequeue(T& out)
         {
+            WaiterGuard waiter{_waiters};
             std::unique_lock lock{_mutex};
 
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
@@ -154,6 +158,7 @@ namespace vanilo::concurrent {
          */
         bool waitDequeue(const CancellationToken& token, T& out)
         {
+            WaiterGuard waiter{_waiters};
             // token.subscribe must be called outside the std::unique_lock lock{_mutex}.
             // If token.subscribe is ever moved inside the lock to "protect" it, a deadlock will occur
             // because the callback would attempt to acquire the same mutex recursively.
@@ -259,7 +264,22 @@ namespace vanilo::concurrent {
         }
 
       private:
+        struct WaiterGuard
+        {
+            std::atomic<int>& _counter;
+            explicit WaiterGuard(std::atomic<int>& counter): _counter(counter)
+            {
+                _counter.fetch_add(1, std::memory_order_acq_rel);
+            }
+
+            ~WaiterGuard()
+            {
+                _counter.fetch_sub(1, std::memory_order_acq_rel);
+            }
+        };
+
         bool _closed{false};
+        std::atomic<int> _waiters{0};
         std::condition_variable _condition;
         mutable std::mutex _mutex;
         std::deque<T> _queue;
