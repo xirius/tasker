@@ -7,6 +7,23 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 
+# Sanitizer flags for a TAAN build configuration
+set(CMAKE_CXX_FLAGS_ASAN "-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined")
+set(CMAKE_C_FLAGS_ASAN "-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined")
+set(CMAKE_LINKER_FLAGS_ASAN "-fsanitize=address,undefined")
+
+# ThreadSanitizer flags for a TSAN build configuration
+set(CMAKE_CXX_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread")
+set(CMAKE_C_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread")
+set(CMAKE_EXE_LINKER_FLAGS_TSAN "-fsanitize=thread")
+set(CMAKE_SHARED_LINKER_FLAGS_TSAN "-fsanitize=thread")
+
+# Sanitizer flags for a TSAN + build configuration | Clang
+#set(CMAKE_CXX_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread,undefined")
+#set(CMAKE_C_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread,undefined")
+#set(CMAKE_EXE_LINKER_FLAGS_TSAN "-fsanitize=thread,undefined")
+#set(CMAKE_SHARED_LINKER_FLAGS_TSAN "-fsanitize=thread,undefined")
+
 # Defining library
 add_library("${TARGET_NAME}" "")
 add_library("${TARGET_ALIAS}" ALIAS "${TARGET_NAME}")
