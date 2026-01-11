@@ -1,4 +1,9 @@
-#include <vanilo/tasker/DefaultThreadPoolExecutor.h>
+#include "vanilo/tasker/DefaultThreadPoolExecutor.h"
+
+#include <vanilo/core/Tracer.h>
+
+#include <mutex>
+#include <vector>
 
 using namespace vanilo::concurrent;
 using namespace vanilo::tasker;
@@ -19,37 +24,44 @@ class StopThreadTask final: public Task
 {
   public:
     explicit StopThreadTask(
-        TaskExecutor* executor, std::thread thread, std::shared_ptr<std::promise<void>> promise, std::shared_ptr<std::atomic_int> counter)
-        : _executor{executor}, _thread{std::move(thread)}, _promise{std::move(promise)}, _counter{std::move(counter)}
+        std::shared_ptr<std::promise<void>> promise,
+        std::shared_ptr<std::atomic_int> counter,
+        std::map<std::thread::id, std::thread>& threads,
+        std::mutex& mutex)
+        : _promise{std::move(promise)}, _counter{std::move(counter)}, _threads{threads}, _mutex{mutex}
     {
     }
 
     void cancel() noexcept override
     {
+        _cancelled.store(true, std::memory_order_release);
     }
 
-    void run() override
+    [[noreturn]] void run() override
     {
-        // Detach the thread if the right thread is found
-        if (std::this_thread::get_id() == _thread.get_id()) {
-            _thread.detach();
-
-            if (--*_counter == 0) {
-                // All the scheduled threads that have to be stopped are found
-                _promise->set_value();
+        if (!_cancelled.load(std::memory_order_acquire)) {
+            std::lock_guard lock{_mutex};
+            if (const auto it = _threads.find(std::this_thread::get_id()); it != _threads.end()) {
+                it->second.detach(); // NOSONAR
+                _threads.erase(it);
             }
-
-            throw StopThreadException{};
+            // else: thread might have been removed by invalidate() or another resize
         }
 
-        _executor->submit(std::make_unique<StopThreadTask>(_executor, std::move(_thread), std::move(_promise), std::move(_counter)));
+        if (--*_counter == 0) {
+            // All the scheduled threads that have to be stopped are found
+            _promise->set_value();
+        }
+
+        throw StopThreadException{};
     }
 
   private:
-    TaskExecutor* _executor;
-    std::thread _thread;
     std::shared_ptr<std::promise<void>> _promise;
     std::shared_ptr<std::atomic_int> _counter;
+    std::map<std::thread::id, std::thread>& _threads;
+    std::atomic_bool _cancelled{false};
+    std::mutex& _mutex;
 };
 
 /// DefaultThreadPoolExecutor implementation
@@ -62,12 +74,18 @@ DefaultThreadPoolExecutor::DefaultThreadPoolExecutor(const size_t numThreads)
 
 DefaultThreadPoolExecutor::~DefaultThreadPoolExecutor()
 {
-    invalidate();
+    try {
+        invalidate();
+    }
+    catch (...) { // NOSONAR
+        // Ignore
+    }
 }
 
-bool DefaultThreadPoolExecutor::containsThread(std::thread::id threadId) const
+bool DefaultThreadPoolExecutor::containsThread(const std::thread::id threadId) const
 {
-    return _threads.contains([&threadId](const std::thread& thread) -> bool { return thread.get_id() == threadId; });
+    std::lock_guard lock{_mutex};
+    return _threads.find(threadId) != _threads.end();
 }
 
 size_t DefaultThreadPoolExecutor::count() const
@@ -77,23 +95,32 @@ size_t DefaultThreadPoolExecutor::count() const
 
 size_t DefaultThreadPoolExecutor::threadCount() const noexcept
 {
+    std::lock_guard lock{_mutex};
     return _threads.size();
 }
 
 std::vector<std::thread::id> DefaultThreadPoolExecutor::threadIds() const
 {
-    const std::function<std::thread::id(const std::thread&)> selector = [](auto& thread) { return thread.get_id(); };
-    return _threads.toList(selector);
+    std::lock_guard lock{_mutex};
+    std::vector<std::thread::id> ids;
+
+    ids.reserve(_threads.size());
+    for (const auto& [id, thread] : _threads) {
+        ids.push_back(id);
+    }
+
+    return ids;
 }
 
 std::future<void> DefaultThreadPoolExecutor::resize(const size_t numThreads)
 {
-    std::lock_guard _lock{_mutex};
+    std::lock_guard lock{_mutex};
     auto promise = std::make_shared<std::promise<void>>();
 
     if (_threads.size() < numThreads) {
         for (auto i = _threads.size(); i < numThreads; i++) {
-            _threads.enqueue(std::thread{&DefaultThreadPoolExecutor::worker, this});
+            std::thread thread{&DefaultThreadPoolExecutor::worker, this};
+            _threads.emplace(thread.get_id(), std::move(thread));
         }
 
         promise->set_value();
@@ -102,12 +129,11 @@ std::future<void> DefaultThreadPoolExecutor::resize(const size_t numThreads)
 
     if (_threads.size() > numThreads) {
         auto counter = std::make_shared<std::atomic_int>(_threads.size() - numThreads);
-        std::thread thread;
 
         for (auto i = _threads.size(); i > numThreads; i--) {
-            if (_threads.tryDequeue(thread)) {
-                submit(std::make_unique<StopThreadTask>(this, std::move(thread), promise, counter));
-            }
+            // Use enqueueFront (priority) to ensure we stop threads as soon as possible,
+            // preventing starvation if the queue has long-running tasks.
+            _queue.enqueueFront(std::make_unique<StopThreadTask>(promise, counter, _threads, _mutex));
         }
 
         return promise->get_future();
@@ -137,15 +163,34 @@ void DefaultThreadPoolExecutor::init(const size_t numThreads)
 
 void DefaultThreadPoolExecutor::invalidate()
 {
-    const auto tasks = _queue.invalidate();
+    resize(0);
 
-    for (const auto& task : tasks) {
-        task->cancel();
-        task->run();
+    std::vector<std::unique_ptr<Task>> tasks;
+    {
+        std::lock_guard lock{_mutex};
+        tasks = _queue.close();
     }
 
-    std::thread thread;
-    while (_threads.tryDequeue(thread)) {
+    for (const auto& task : tasks) {
+        try {
+            task->cancel();
+            task->run();
+        }
+        catch (...) { // NOSONAR
+            // Ignore
+        }
+    }
+
+    std::vector<std::thread> threadsToJoin;
+    {
+        std::lock_guard lock{_mutex};
+        for (auto& [id, thread] : _threads) {
+            threadsToJoin.push_back(std::move(thread));
+        }
+        _threads.clear();
+    }
+
+    for (auto& thread : threadsToJoin) {
         if (thread.joinable()) {
             thread.join();
         }
@@ -154,29 +199,28 @@ void DefaultThreadPoolExecutor::invalidate()
 
 void DefaultThreadPoolExecutor::worker()
 {
-    try {
-        std::unique_ptr<Task> task;
+    std::unique_ptr<Task> task;
 
-        while (true) {
-            if (!_queue.waitDequeue(task)) {
-                return;
-            }
-
-            try {
-                task->run();
-            }
-            catch (const StopThreadException&) {
-                throw; // This thread was asked to exit so propagate the exception
-            }
-            catch (const std::exception& ex) {
-                TRACE("An unhandled exception occurred during execution of the task. Message: %s", ex.what());
-            }
-            catch (...) {
-                TRACE("An unhandled exception occurred during execution of the task!");
-            }
+    while (true) {
+        if (!_queue.waitDequeue(task)) {
+            return;
         }
-    }
-    catch (const StopThreadException&) {
-        // Gracefully stop the thread execution
+
+        try {
+            task->run();
+        }
+        catch (const StopThreadException&) {
+            // Gracefully stop the thread execution
+            return;
+        }
+        catch (const OperationCanceledException&) { // NOSONAR
+            // Ignore
+        }
+        catch (const std::exception& ex) {
+            TRACE("An unhandled exception occurred during execution of the task. Message: %s", ex.what());
+        }
+        catch (...) {
+            TRACE("An unhandled exception occurred during execution of the task!");
+        }
     }
 }

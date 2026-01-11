@@ -4,6 +4,9 @@
 #include <vanilo/concurrent/ConcurrentQueue.h>
 #include <vanilo/tasker/Tasker.h>
 
+#include <map>
+#include <vector>
+
 namespace vanilo::tasker {
 
     /// DefaultThreadPoolExecutor
@@ -28,8 +31,8 @@ namespace vanilo::tasker {
         void worker();
 
         concurrent::ConcurrentQueue<std::unique_ptr<Task>> _queue;
-        concurrent::ConcurrentQueue<std::thread> _threads;
-        std::mutex _mutex;
+        std::map<std::thread::id, std::thread> _threads;
+        mutable std::mutex _mutex;
     };
 
 } // namespace vanilo::tasker
