@@ -25,6 +25,9 @@ namespace vanilo::tasker {
         template <typename Invocable, typename Signature, typename Arg, bool Primary = true>
         class Builder;
 
+        template <typename Invocable, typename Signature, typename Arg>
+        class PeriodicBuilder;
+
       public:
         using CancellationToken = concurrent::CancellationToken;
 
@@ -257,6 +260,31 @@ namespace vanilo::tasker {
         using Builder<Invocable, Signature, Arg, false>::Builder;
     };
 
+    template <typename Invocable, typename Signature, typename Arg>
+    class Task::PeriodicBuilder final: public Builder<Invocable, Signature, Arg, false>
+    {
+        friend Task;
+
+        template <typename T>
+        using IsExecutor = std::is_base_of<TaskExecutor, std::remove_pointer_t<std::decay_t<T>>>;
+
+        template <typename Functor>
+        using TaskBuilder = PeriodicBuilder<Invocable, Functor, Arg>;
+
+      public:
+        template <typename TaskFunc, typename... Args, typename TaskBuilder = PeriodicBuilder<void, TaskFunc, Arg>>
+        auto then(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
+        template <typename TaskFunc, typename... Args>
+        auto onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args);
+
+        template <typename TaskFunc, typename... Args, typename = std::enable_if_t<!IsExecutor<TaskFunc>::value>>
+        auto onException(TaskFunc&& func, Args&&... args);
+
+      private:
+        using Builder<Invocable, Signature, Arg, false>::Builder;
+    };
+
     namespace internal {
         using CancellationToken = concurrent::CancellationToken;
 
@@ -343,6 +371,23 @@ namespace vanilo::tasker {
             {
             }
 
+            [[nodiscard]] virtual std::unique_ptr<ChainableTask> clone() const = 0;
+
+            [[nodiscard]] std::unique_ptr<ChainableTask> cloneChain(const bool skipSelf) const
+            {
+                if (skipSelf) {
+                    return _next ? _next->cloneChain(false) : nullptr;
+                }
+
+                auto cloned = clone();
+                if (cloned && _next) {
+                    if (auto clonedNext = _next->cloneChain(false)) {
+                        cloned->setNext(std::move(clonedNext));
+                    }
+                }
+                return cloned;
+            }
+
             void cancel() noexcept override
             {
                 _cancelled.store(true, std::memory_order_release);
@@ -392,6 +437,11 @@ namespace vanilo::tasker {
             void scheduleNext()
             {
                 if (!_next) {
+                    return;
+                }
+
+                if (_next->isCanceled() || _next->getToken().isCancellationRequested()) {
+                    _next.reset();
                     return;
                 }
 
@@ -468,8 +518,16 @@ namespace vanilo::tasker {
                 bool (*)(TaskExecutor* executor, const CancellationToken&, Callable&, const std::any&, const std::exception_ptr&);
 
           public:
-            explicit BaseTask(TaskExecutor* executor, Callable&& task): ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}
+            explicit BaseTask(TaskExecutor* executor, Callable&& task)
+                : ParameterizedChainableTask<Arg>{executor}, _task{std::move(task)}, _errorHandler{nullptr}
             {
+            }
+
+            BaseTask(const BaseTask& other)
+                : ParameterizedChainableTask<Arg>{other.getExecutor()}, _task{other._task}, _errorExecutor{other._errorExecutor},
+                  _errorMetadata{other._errorMetadata}, _errorHandler{other._errorHandler}
+            {
+                this->setToken(other.getToken());
             }
 
             template <typename Functor, typename... Args>
@@ -499,10 +557,12 @@ namespace vanilo::tasker {
                     return;
                 }
 
-                if (!_errorHandler(_errorExecutor, this->_token, _task, _errorMetadata, exPtr)) {
-                    // The task did not handle exception, so it is rethrown
-                    std::rethrow_exception(exPtr);
+                if (_errorHandler && _errorHandler(_errorExecutor, this->getToken(), _task, _errorMetadata, exPtr)) {
+                    return;
                 }
+
+                // The task did not handle exception, so it is rethrown
+                std::rethrow_exception(exPtr);
             }
 
             template <typename T = Arg, std::enable_if_t<std::is_void_v<T>, std::nullptr_t> = nullptr>
@@ -775,6 +835,17 @@ namespace vanilo::tasker {
             {
             }
 
+            [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+            {
+                if constexpr (Promised) {
+                    assert(false && "Promised tasks cannot be cloned");
+                    return nullptr;
+                }
+                else {
+                    return std::make_unique<Invocable>(*this);
+                }
+            }
+
             void run() override
             {
                 try {
@@ -813,6 +884,17 @@ namespace vanilo::tasker {
             explicit Invocable(BaseInvocable<Callable, Result, void, false>&& other) noexcept
                 : BaseInvocable<Callable, Result, void, true>{std::move(other)}
             {
+            }
+
+            [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+            {
+                if constexpr (Promised) {
+                    assert(false && "Promised tasks cannot be cloned");
+                    return nullptr;
+                }
+                else {
+                    return std::make_unique<Invocable>(*this);
+                }
             }
 
             void run() override
@@ -855,6 +937,17 @@ namespace vanilo::tasker {
             {
             }
 
+            [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+            {
+                if constexpr (Promised) {
+                    assert(false && "Promised tasks cannot be cloned");
+                    return nullptr;
+                }
+                else {
+                    return std::make_unique<Invocable>(*this);
+                }
+            }
+
             void run() override
             {
                 try {
@@ -882,6 +975,17 @@ namespace vanilo::tasker {
             explicit Invocable(BaseInvocable<Callable, void, void, false>&& other) noexcept
                 : BaseInvocable<Callable, void, void, true>{std::move(other)}
             {
+            }
+
+            [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+            {
+                if constexpr (Promised) {
+                    assert(false && "Promised tasks cannot be cloned");
+                    return nullptr;
+                }
+                else {
+                    return std::make_unique<Invocable>(*this);
+                }
             }
 
             void run() override
@@ -1041,6 +1145,45 @@ namespace vanilo::tasker {
         return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
     }
 
+    /// Task::PeriodicBuilder implementation
+    /// ============================================================================================
+
+    template <typename Invocable, typename Signature, typename Arg>
+    template <typename TaskFunc, typename... Args, typename TaskBuilder>
+    auto Task::PeriodicBuilder<Invocable, Signature, Arg>::then(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    {
+        internal::ArityChecker<
+            std::decay_t<typename Builder<Invocable, Signature, Arg, false>::ResultType>, typename TaskBuilder::PureArgs>::validate();
+        constexpr bool HasToken = std::is_same_v<std::decay_t<typename TaskBuilder::FirstArg>, CancellationToken>;
+        constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
+
+        auto invocable = internal::BuilderHelper<
+            typename TaskBuilder::ResultType, typename Builder<Invocable, Signature, Arg, false>::ResultType, IsMember,
+            HasToken>::createInvocable(executor, this->_task->getToken(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        auto last = invocable.get();
+
+        this->_last->setNext(std::move(invocable));
+        return PeriodicBuilder<typename decltype(invocable)::element_type, TaskFunc, Arg>{std::move(this->_task), this->_last, last};
+    }
+
+    template <typename Invocable, typename Signature, typename Arg>
+    template <typename TaskFunc, typename... Args>
+    auto Task::PeriodicBuilder<Invocable, Signature, Arg>::onException(TaskExecutor* executor, TaskFunc&& func, Args&&... args)
+    {
+        auto task = static_cast<Invocable*>(this->_task->getLastTask());
+        task->setupExceptionCallback(executor, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
+    }
+
+    template <typename Invocable, typename Signature, typename Arg>
+    template <typename TaskFunc, typename... Args, typename>
+    auto Task::PeriodicBuilder<Invocable, Signature, Arg>::onException(TaskFunc&& func, Args&&... args)
+    {
+        auto task = static_cast<Invocable*>(this->_task->getLastTask());
+        task->setupExceptionCallback(this->_task->getExecutor(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
+    }
+
     /// Task implementation
     /// ============================================================================================
 
@@ -1092,10 +1235,6 @@ namespace vanilo::tasker {
         TaskFunc&& func,
         Args&&... args)
     {
-        if (!interval.count()) {
-            return Task::run(executor, token, initialDelay, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
-        }
-
         constexpr bool HasToken = std::is_same_v<std::decay_t<typename TaskBuilder::FirstArg>, CancellationToken>;
         constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
 
@@ -1105,7 +1244,7 @@ namespace vanilo::tasker {
         auto scheduled = internal::TaskHelper::convertTask(std::move(invocable), initialDelay, interval);
         auto current = scheduled.get();
 
-        return Builder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(scheduled), current, last};
+        return PeriodicBuilder<typename decltype(invocable)::element_type, TaskFunc, void>{std::move(scheduled), current, last};
     }
 
 } // namespace vanilo::tasker

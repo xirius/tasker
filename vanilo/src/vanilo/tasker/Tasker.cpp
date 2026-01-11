@@ -17,7 +17,7 @@ std::unique_ptr<LocalThreadExecutor> LocalThreadExecutor::create()
 /// ThreadPoolExecutor
 /// ================================================================================================
 
-size_t ThreadPoolExecutor::DefaultThreadNumber = !std::thread::hardware_concurrency() ? 1 : std::thread::hardware_concurrency();
+inline size_t ThreadPoolExecutor::DefaultThreadNumber = !std::thread::hardware_concurrency() ? 1 : std::thread::hardware_concurrency();
 
 std::unique_ptr<ThreadPoolExecutor> ThreadPoolExecutor::create()
 {
@@ -31,12 +31,13 @@ std::unique_ptr<ThreadPoolExecutor> ThreadPoolExecutor::create(size_t numThreads
 
 /// TaskHelper
 /// ========================================================================================
+static const auto scheduler = TaskScheduler::create();
 
 std::unique_ptr<internal::ChainableTask> internal::TaskHelper::convertTask(
     std::unique_ptr<ChainableTask> task, const steady_clock::duration delay)
 {
-    static auto scheduler = TaskScheduler::create();
     auto scheduledTask = ScheduledTask::create(scheduler.get(), steady_clock::now() + delay);
+    scheduledTask->setToken(task->getToken());
     scheduledTask->setNext(std::move(task));
     return scheduledTask;
 }
@@ -44,8 +45,8 @@ std::unique_ptr<internal::ChainableTask> internal::TaskHelper::convertTask(
 std::unique_ptr<internal::ChainableTask> internal::TaskHelper::convertTask(
     std::unique_ptr<ChainableTask> task, const steady_clock::duration delay, const steady_clock::duration interval)
 {
-    static auto scheduler = TaskScheduler::create();
     auto scheduledTask = ScheduledTask::create(scheduler.get(), steady_clock::now() + delay, interval);
+    scheduledTask->setToken(task->getToken());
     scheduledTask->setNext(std::move(task));
     return scheduledTask;
 }

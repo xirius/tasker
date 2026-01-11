@@ -20,6 +20,7 @@ namespace {
         }
         void cancel() noexcept override
         {
+            // Ignore
         }
         void run() override
         {
@@ -59,6 +60,7 @@ namespace {
         }
         void handleException(std::exception_ptr) override
         {
+            // Ignore
         }
 
         std::vector<int>& _order;
@@ -108,7 +110,7 @@ TEST_CASE("Scheduler orders by earliest due and sequence", "[scheduler]")
 
 TEST_CASE("Scheduler can run a plain Task via adapter", "[scheduler][adapter]")
 {
-    auto scheduler = TaskScheduler::create();
+    const auto scheduler = TaskScheduler::create();
     std::atomic_int runCounter{0};
 
     scheduler->submit(std::make_unique<PlainTask>(runCounter));
@@ -148,12 +150,12 @@ TEST_CASE("Scheduler periodic rescheduling occurs", "[scheduler][periodic]")
         }
         void handleException(std::exception_ptr) override
         {
+            // Ignore
         }
         std::atomic_int& counter;
     };
 
     scheduledTask->setNext(std::make_unique<CountTask>(localExecutor.get(), hitCounter));
-
     scheduler->submit(std::move(scheduledTask));
 
     // Poll for ~800ms, periodically processing local executor
@@ -162,7 +164,7 @@ TEST_CASE("Scheduler periodic rescheduling occurs", "[scheduler][periodic]")
         localExecutor->process(100);
     }
 
-    // Expect at least one firing; depending on chain semantics, subsequent periods may not
+    // Expect at least one firing; depending on chain semantics, the following periods may not
     // re-emit the same next task without rebuilding the chain.
     REQUIRE(hitCounter.load() >= 1);
 }
@@ -194,6 +196,7 @@ TEST_CASE("Canceled scheduled task is not executed", "[scheduler][cancel]")
         }
         void handleException(std::exception_ptr) override
         {
+            // Ignore
         }
         std::atomic_int& counter;
     };
@@ -223,6 +226,7 @@ TEST_CASE("DefaultLocalThreadExecutor processes tasks and respects maxCount", "[
             }
             void cancel() noexcept override
             {
+                // Ignore
             }
             void run() override
             {
@@ -230,6 +234,7 @@ TEST_CASE("DefaultLocalThreadExecutor processes tasks and respects maxCount", "[
             }
             std::atomic_int& counter;
         };
+
         localExecutor->submit(std::make_unique<CounterTask>(counter));
     }
 
@@ -246,7 +251,7 @@ TEST_CASE("DefaultLocalThreadExecutor processes tasks and respects maxCount", "[
 
 TEST_CASE("DefaultLocalThreadExecutor process(token) stops on cancellation", "[executor][local][token]")
 {
-    auto localExecutor = LocalThreadExecutor::create();
+    const auto localExecutor = LocalThreadExecutor::create();
     const vanilo::concurrent::CancellationTokenSource cancellationTokenSource;
     std::atomic_int counter{0};
 
@@ -259,6 +264,7 @@ TEST_CASE("DefaultLocalThreadExecutor process(token) stops on cancellation", "[e
             }
             void cancel() noexcept override
             {
+                // Ignore
             }
             void run() override
             {
@@ -266,17 +272,19 @@ TEST_CASE("DefaultLocalThreadExecutor process(token) stops on cancellation", "[e
             }
             std::atomic_int& counter;
         };
+
         localExecutor->submit(std::make_unique<CounterTask>(counter));
     }
 
-    std::thread canceller([&] {
+    std::thread canceller([&cancellationTokenSource] {
         std::this_thread::sleep_for(30ms);
         cancellationTokenSource.cancel();
     });
 
     const auto remaining = localExecutor->process(cancellationTokenSource.token());
-    if (canceller.joinable())
+    if (canceller.joinable()) {
         canceller.join();
+    }
 
     // Some tasks might be processed before cancellation; ensure we exited and the queue reflects remaining tasks
     REQUIRE(remaining <= 3);
@@ -290,11 +298,12 @@ TEST_CASE("ThreadPoolExecutor submits tasks and can resize", "[executor][pool]")
     for (int i = 0; i < 10; ++i) {
         struct CounterTask final: Task
         {
-            CounterTask(std::atomic_int& counter): counter(counter)
+            explicit CounterTask(std::atomic_int& counter): counter(counter)
             {
             }
             void cancel() noexcept override
             {
+                // Ignore
             }
             void run() override
             {
@@ -302,6 +311,7 @@ TEST_CASE("ThreadPoolExecutor submits tasks and can resize", "[executor][pool]")
             }
             std::atomic_int& counter;
         };
+
         threadPool->submit(std::make_unique<CounterTask>(counter));
     }
 
@@ -312,6 +322,7 @@ TEST_CASE("ThreadPoolExecutor submits tasks and can resize", "[executor][pool]")
     // Resize up and then down, ensure futures resolve
     auto resizeFutureIncrease = threadPool->resize(4);
     REQUIRE_NOTHROW(resizeFutureIncrease.get());
+
     auto resizeFutureDecrease = threadPool->resize(1);
     REQUIRE_NOTHROW(resizeFutureDecrease.get());
 
@@ -319,11 +330,12 @@ TEST_CASE("ThreadPoolExecutor submits tasks and can resize", "[executor][pool]")
     for (int i = 0; i < 5; ++i) {
         struct CounterTask2 final: Task
         {
-            CounterTask2(std::atomic_int& counter): counter(counter)
+            explicit CounterTask2(std::atomic_int& counter): counter(counter)
             {
             }
             void cancel() noexcept override
             {
+                // Ignore
             }
             void run() override
             {
@@ -331,8 +343,10 @@ TEST_CASE("ThreadPoolExecutor submits tasks and can resize", "[executor][pool]")
             }
             std::atomic_int& counter;
         };
+
         threadPool->submit(std::make_unique<CounterTask2>(counter));
     }
+
     std::this_thread::sleep_for(100ms);
     REQUIRE(counter.load() >= 6);
 }
