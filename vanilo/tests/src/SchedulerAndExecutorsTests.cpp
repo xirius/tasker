@@ -23,16 +23,23 @@ namespace {
         }
         void run() override
         {
-            ++_counter;
+            _counter.fetch_add(1);
         }
         std::atomic_int& _counter;
     };
 
     struct NotifyTask final: internal::ChainableTask
     {
-        NotifyTask(TaskExecutor* executor, std::vector<int>& order, std::mutex& mutex, std::condition_variable& conditionVariable, int tag)
-            : internal::ChainableTask(executor), _order(order), _mutex(mutex), _conditionVariable(conditionVariable), _tag(tag)
+        NotifyTask(
+            TaskExecutor* executor, std::vector<int>& order, std::mutex& mutex, std::condition_variable& conditionVariable, const int tag)
+            : ChainableTask{executor}, _order{order}, _mutex{mutex}, _conditionVariable{conditionVariable}, _tag{tag}
+
         {
+        }
+
+        [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+        {
+            return std::make_unique<NotifyTask>(getExecutor(), _order, _mutex, _conditionVariable, _tag);
         }
 
         void run() override
@@ -127,10 +134,13 @@ TEST_CASE("Scheduler periodic rescheduling occurs", "[scheduler][periodic]")
         CountTask(TaskExecutor* executor, std::atomic_int& counter): ChainableTask(executor), counter(counter)
         {
         }
+        [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+        {
+            return std::make_unique<CountTask>(getExecutor(), counter);
+        }
         void run() override
         {
             ++counter;
-            scheduleNext();
         }
         [[nodiscard]] bool isPromised() const noexcept override
         {
@@ -170,10 +180,13 @@ TEST_CASE("Canceled scheduled task is not executed", "[scheduler][cancel]")
         IncTask(TaskExecutor* executor, std::atomic_int& counter): ChainableTask(executor), counter(counter)
         {
         }
+        [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+        {
+            return std::make_unique<IncTask>(getExecutor(), counter);
+        }
         void run() override
         {
             ++counter;
-            scheduleNext();
         }
         [[nodiscard]] bool isPromised() const noexcept override
         {
@@ -199,13 +212,13 @@ TEST_CASE("Canceled scheduled task is not executed", "[scheduler][cancel]")
 
 TEST_CASE("DefaultLocalThreadExecutor processes tasks and respects maxCount", "[executor][local]")
 {
-    auto localExecutor = LocalThreadExecutor::create();
+    const auto localExecutor = LocalThreadExecutor::create();
     std::atomic_int counter{0};
 
     for (int i = 0; i < 5; ++i) {
         struct CounterTask final: Task
         {
-            CounterTask(std::atomic_int& counter): counter(counter)
+            explicit CounterTask(std::atomic_int& counter): counter(counter)
             {
             }
             void cancel() noexcept override
@@ -241,7 +254,7 @@ TEST_CASE("DefaultLocalThreadExecutor process(token) stops on cancellation", "[e
     for (int i = 0; i < 3; ++i) {
         struct CounterTask final: Task
         {
-            CounterTask(std::atomic_int& counter): counter(counter)
+            explicit CounterTask(std::atomic_int& counter): counter(counter)
             {
             }
             void cancel() noexcept override
@@ -265,7 +278,7 @@ TEST_CASE("DefaultLocalThreadExecutor process(token) stops on cancellation", "[e
     if (canceller.joinable())
         canceller.join();
 
-    // Some tasks might be processed before cancellation; ensure we exited and queue reflects remaining tasks
+    // Some tasks might be processed before cancellation; ensure we exited and the queue reflects remaining tasks
     REQUIRE(remaining <= 3);
 }
 

@@ -23,6 +23,8 @@ namespace vanilo::tasker {
 
         ScheduledTask(TaskExecutor* executor, steady_clock::time_point due, std::uint64_t sequence);
 
+        [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override;
+
         void run() override;
 
         [[nodiscard]] steady_clock::time_point due() const

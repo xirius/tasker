@@ -5,6 +5,7 @@
 using namespace vanilo::tasker;
 
 namespace {
+
     /// Generates a monotonically increasing sequence number for strict-weak ordering tie-breaks
     std::uint64_t nextSequence()
     {
@@ -20,13 +21,16 @@ namespace {
         {
         }
 
+        [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
+        {
+            return std::make_unique<RunTaskAdapter>(getExecutor(), nullptr);
+        }
+
         void run() override
         {
-            if (_task && !isCanceled()) {
+            if (_task && !isCanceled() && !getToken().isCancellationRequested()) {
                 _task->run();
             }
-
-            scheduleNext();
         }
 
       private:
@@ -65,9 +69,35 @@ ScheduledTask::ScheduledTask(TaskExecutor* executor, const steady_clock::time_po
 {
 }
 
+std::unique_ptr<internal::ChainableTask> ScheduledTask::clone() const
+{
+    auto cloned = std::make_unique<ScheduledTask>(this->getExecutor(), _due, nextSequence());
+    cloned->setInterval(_interval);
+    cloned->setToken(this->getToken());
+    return cloned;
+}
+
 void ScheduledTask::run()
 {
-    scheduleNext();
+    if (isPeriodic()) {
+        if (this->isCanceled() || this->getToken().isCancellationRequested()) {
+            return;
+        }
+
+        if (this->hasNext()) {
+            if (auto cloned = this->cloneChain(true)) {
+                const auto executor = cloned->getExecutor();
+                cloned->setToken(this->getToken());
+                executor->submit(std::move(cloned));
+            }
+        }
+    }
+    else if (const auto next = this->nextTaskAs<RunTaskAdapter*>()) {
+        next->run();
+    }
+    else {
+        scheduleNext();
+    }
 }
 
 void ScheduledTask::setDue(const steady_clock::time_point due)
@@ -134,16 +164,16 @@ void TaskScheduler::submit(std::unique_ptr<Task> task)
     }
     else {
         // Wrap a generic Task into a chainable adapter so it can be scheduled and executed
-        static auto defaultThreadPool = ThreadPoolExecutor::create(1);
-        auto adapter = std::make_unique<RunTaskAdapter>(defaultThreadPool.get(), std::move(task));
-        scheduled = ScheduledTask::create(defaultThreadPool.get(), std::chrono::steady_clock::now());
+        auto adapter = std::make_unique<RunTaskAdapter>(this, std::move(task));
+        scheduled = ScheduledTask::create(this, std::chrono::steady_clock::now());
         scheduled->setNext(std::move(adapter));
     }
 
-    {
+    { // protected
         std::scoped_lock lock(_mutex);
         _queue.insert(std::move(scheduled));
     }
+
     _condition.notify_one();
 }
 
@@ -170,8 +200,16 @@ void TaskScheduler::worker()
         }
 
         // Execute outside the lock
-        if (!current->isCanceled()) {
-            current->run();
+        if (!current->isCanceled() && !current->getToken().isCancellationRequested()) {
+            try {
+                current->run();
+            }
+            catch (const std::exception& ex) {
+                TRACE("An unhandled exception occurred during execution of the task. Message: %s", ex.what());
+            }
+            catch (...) {
+                TRACE("An unhandled exception occurred during execution of the task!");
+            }
         }
 
         // Reschedule if periodic
@@ -213,7 +251,7 @@ std::unique_ptr<ScheduledTask> TaskScheduler::popTopLocked()
 
 void TaskScheduler::rescheduleIfNeeded(std::unique_ptr<ScheduledTask>& current)
 {
-    if (current->isCanceled()) {
+    if (current->isCanceled() || current->getToken().isCancellationRequested()) {
         return;
     }
 
