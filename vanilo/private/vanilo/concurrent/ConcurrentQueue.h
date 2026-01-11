@@ -98,6 +98,42 @@ namespace vanilo::concurrent {
         }
 
         /**
+         * Adds the given element value to the front of the queue.
+         * @param value The value of the element to push.
+         * @return True if the element was added; false if the queue is invalid.
+         */
+        bool enqueueFront(const T& value)
+        {
+            std::lock_guard lock{_mutex};
+
+            if (_closed) {
+                return false;
+            }
+
+            _queue.push_front(value);
+            _condition.notify_one();
+            return true;
+        }
+
+        /**
+         * Adds the given element value to the front of the queue.
+         * @param value The value of the element to push.
+         * @return True if the element was added; false if the queue is invalid.
+         */
+        bool enqueueFront(T&& value)
+        {
+            std::lock_guard lock{_mutex};
+
+            if (_closed) {
+                return false;
+            }
+
+            _queue.push_front(std::move(value));
+            _condition.notify_one();
+            return true;
+        }
+
+        /**
          * Attempts to retrieve the first element from the queue (non-blocking). The element is removed from the queue.
          * @param out The retrieved element from the queue.
          * @return True if an element was successfully written to the out parameter, false otherwise.

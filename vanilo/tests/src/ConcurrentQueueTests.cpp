@@ -290,3 +290,32 @@ TEST_CASE("ConcurrentQueue helper methods", "[concurrent][ConcurrentQueue]")
         REQUIRE(list[2] == "3");
     }
 }
+
+TEST_CASE("ConcurrentQueue enqueueFront", "[concurrent][ConcurrentQueue][enqueueFront]")
+{
+    ConcurrentQueue<int> queue;
+
+    SECTION("EnqueueFront adds to the beginning")
+    {
+        queue.enqueue(1);
+        queue.enqueue(2);
+
+        REQUIRE(queue.enqueueFront(0));
+
+        int val;
+        REQUIRE(queue.tryDequeue(val));
+        REQUIRE(val == 0);
+        REQUIRE(queue.tryDequeue(val));
+        REQUIRE(val == 1);
+        REQUIRE(queue.tryDequeue(val));
+        REQUIRE(val == 2);
+    }
+
+    SECTION("EnqueueFront works on empty queue")
+    {
+        REQUIRE(queue.enqueueFront(10));
+        int val;
+        REQUIRE(queue.tryDequeue(val));
+        REQUIRE(val == 10);
+    }
+}
