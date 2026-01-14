@@ -7,6 +7,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -198,19 +199,19 @@ namespace vanilo::concurrent {
             // token.subscribe must be called outside the std::unique_lock lock{_mutex}.
             // If token.subscribe is ever moved inside the lock to "protect" it, a deadlock will occur
             // because the callback would attempt to acquire the same mutex recursively.
-            bool canceled = false;
-            auto subscription = token.subscribe([this, &canceled] {
+            auto canceled = std::make_shared<bool>(false);
+            auto subscription = token.subscribe([this, canceled] {
                 std::unique_lock lock{_mutex};
-                canceled = true;
+                *canceled = true;
                 _condition.notify_all();
             });
 
             std::unique_lock lock{_mutex};
             // Using the condition in the predicate ensures that spurious wake-ups with a valid
             // but empty queue will not proceed, so only need to check for validity before proceeding.
-            _condition.wait(lock, [this, &canceled] { return !_queue.empty() || canceled || _closed; });
+            _condition.wait(lock, [this, canceled] { return !_queue.empty() || *canceled || _closed; });
 
-            if (_queue.empty() && (canceled || _closed)) {
+            if (_queue.empty() && (*canceled || _closed)) {
                 return false;
             }
 
