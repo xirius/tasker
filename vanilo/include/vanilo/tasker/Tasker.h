@@ -614,6 +614,8 @@ namespace vanilo::tasker {
                     }
                 }
 
+                // Task is canceled if it cannot be scheduled due to executor destruction
+                _next->getLastTask()->handleException(std::make_exception_ptr(concurrent::OperationCanceledException()));
                 _next.reset();
             }
 
@@ -859,6 +861,13 @@ namespace vanilo::tasker {
             {
             }
 
+            PromisedTask(PromisedTask&& other) noexcept
+                : ParameterizedChainableTask<Arg>{std::move(other)}, _task{std::move(other._task)}, _promise{std::move(other._promise)}
+            {
+            }
+
+            ~PromisedTask() override = default;
+
             [[nodiscard]] std::future<Result> getFuture()
             {
                 return _promise.get_future();
@@ -928,6 +937,13 @@ namespace vanilo::tasker {
             {
             }
 
+            PromisedTask(PromisedTask&& other) noexcept
+                : ParameterizedChainableTask<Arg>{std::move(other)}, _task{std::move(other._task)}, _promise{std::move(other._promise)}
+            {
+            }
+
+            ~PromisedTask() override = default;
+
             [[nodiscard]] std::future<void> getFuture()
             {
                 return _promise.get_future();
@@ -940,7 +956,7 @@ namespace vanilo::tasker {
 
           protected:
             explicit PromisedTask(BaseTask<Callable, void, Arg>&& other) noexcept
-                : ParameterizedChainableTask<Arg>{std::move(other)}, _task{std::move(other._task)} /// STRANGE
+                : ParameterizedChainableTask<Arg>{std::move(other)}, _task{std::move(other._task)}
             {
             }
 

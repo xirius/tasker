@@ -8,6 +8,7 @@
 
 using namespace std::chrono_literals;
 using namespace vanilo::tasker;
+using namespace vanilo::concurrent;
 
 TEST_CASE("Run task: Result<Arg> without taking the result", "[task]")
 {
@@ -211,4 +212,18 @@ TEST_CASE("Periodic task builder does not have getFuture", "[task][periodic]")
     std::this_thread::sleep_for(1s);
     // We check that we got a PeriodicBuilder
     SUCCEED("PeriodicBuilder returned");
+}
+
+TEST_CASE("Future throws OperationCanceledException when executor destroyed before execution", "[executor][future]")
+{
+    auto executor = ThreadPoolExecutor::create(1);
+    auto future = Task::run(executor.get(), CancellationToken::none(), 100ms, [] { return 123; }).getFuture();
+
+    // Destroy the executor immediately
+    executor.reset();
+
+    // Wait for the delay to pass + some buffer
+    std::this_thread::sleep_for(200ms);
+
+    REQUIRE_THROWS_AS(future.get(), OperationCanceledException);
 }
