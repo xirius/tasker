@@ -21,9 +21,14 @@ namespace {
         {
         }
 
+        RunTaskAdapter(TaskExecutor* executor, std::shared_ptr<LifeCycleGuard> guard, std::unique_ptr<Task> task)
+            : ChainableTask{executor, std::move(guard)}, _task{std::move(task)}
+        {
+        }
+
         [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override
         {
-            return std::make_unique<RunTaskAdapter>(getExecutor(), nullptr);
+            return std::make_unique<RunTaskAdapter>(getExecutor(), getGuard(), nullptr);
         }
 
         void run() override
@@ -53,25 +58,26 @@ namespace {
 
 std::unique_ptr<ScheduledTask> ScheduledTask::create(TaskExecutor* executor, steady_clock::time_point due)
 {
-    return std::make_unique<ScheduledTask>(executor, due, nextSequence());
+    return std::make_unique<ScheduledTask>(executor, executor->getGuard(), due, nextSequence());
 }
 
 std::unique_ptr<ScheduledTask> ScheduledTask::create(
     TaskExecutor* executor, steady_clock::time_point due, const std::optional<steady_clock::duration> interval)
 {
-    auto task = std::make_unique<ScheduledTask>(executor, due, nextSequence());
+    auto task = std::make_unique<ScheduledTask>(executor, executor->getGuard(), due, nextSequence());
     task->setInterval(interval);
     return task;
 }
 
-ScheduledTask::ScheduledTask(TaskExecutor* executor, const steady_clock::time_point due, const std::uint64_t sequence)
-    : ChainableTask{executor}, _due{due}, _sequence{sequence}
+ScheduledTask::ScheduledTask(
+    TaskExecutor* executor, std::shared_ptr<LifeCycleGuard> guard, const steady_clock::time_point due, const std::uint64_t sequence)
+    : ChainableTask{executor, std::move(guard)}, _due{due}, _sequence{sequence}
 {
 }
 
 std::unique_ptr<internal::ChainableTask> ScheduledTask::clone() const
 {
-    auto cloned = std::make_unique<ScheduledTask>(this->getExecutor(), _due, nextSequence());
+    auto cloned = std::make_unique<ScheduledTask>(this->getExecutor(), this->getGuard(), _due, nextSequence());
     cloned->setInterval(_interval);
     cloned->setToken(this->getToken());
     return cloned;
@@ -79,24 +85,30 @@ std::unique_ptr<internal::ChainableTask> ScheduledTask::clone() const
 
 void ScheduledTask::run()
 {
-    if (isPeriodic()) {
-        if (this->isCanceled() || this->getToken().isCancellationRequested()) {
-            return;
+    if (!isPeriodic()) {
+        if (const auto next = this->nextTaskAs<RunTaskAdapter*>()) {
+            next->run();
         }
+        else {
+            scheduleNext();
+        }
+        return;
+    }
 
-        if (this->hasNext()) {
-            if (auto cloned = this->cloneChain(true)) {
-                const auto executor = cloned->getExecutor();
-                cloned->setToken(this->getToken());
-                executor->submit(std::move(cloned));
-            }
+    if (this->isCanceled() || this->getToken().isCancellationRequested()) {
+        return;
+    }
+
+    if (!this->hasNext()) {
+        return;
+    }
+
+    if (auto cloned = this->cloneChain(true)) {
+        if (const auto lock = cloned->acquireGuard()) {
+            const auto executor = cloned->getExecutor();
+            cloned->setToken(this->getToken());
+            executor->submit(std::move(cloned));
         }
-    }
-    else if (const auto next = this->nextTaskAs<RunTaskAdapter*>()) {
-        next->run();
-    }
-    else {
-        scheduleNext();
     }
 }
 

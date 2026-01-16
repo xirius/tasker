@@ -74,6 +74,11 @@ DefaultThreadPoolExecutor::DefaultThreadPoolExecutor(const size_t numThreads)
 
 DefaultThreadPoolExecutor::~DefaultThreadPoolExecutor()
 {
+    // Ensure that no more tasks can be scheduled on this executor from now on.
+    // This is important because ChainableTask checks the gate status before submitting,
+    // protecting us from calling submit() on a destroyed executor.
+    getGuard()->terminate();
+
     try {
         invalidate();
     }

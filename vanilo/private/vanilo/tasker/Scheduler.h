@@ -21,7 +21,7 @@ namespace vanilo::tasker {
         static std::unique_ptr<ScheduledTask> create(
             TaskExecutor* executor, steady_clock::time_point due, std::optional<steady_clock::duration> interval);
 
-        ScheduledTask(TaskExecutor* executor, steady_clock::time_point due, std::uint64_t sequence);
+        ScheduledTask(TaskExecutor* executor, std::shared_ptr<LifeCycleGuard> guard, steady_clock::time_point due, std::uint64_t sequence);
 
         [[nodiscard]] std::unique_ptr<ChainableTask> clone() const override;
 
@@ -90,7 +90,6 @@ namespace vanilo::tasker {
 
       private:
         void worker();
-
         bool shouldStop() const noexcept;
         void waitForTasksOrStop(std::unique_lock<std::mutex>& lock);
         bool waitUntilTopIsDue(std::unique_lock<std::mutex>& lock);

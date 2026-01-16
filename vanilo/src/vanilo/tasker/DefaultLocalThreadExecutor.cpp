@@ -21,6 +21,13 @@ inline void executeTask(Task* task)
 /// DefaultThreadPoolExecutor implementation
 /// ================================================================================================
 
+DefaultLocalThreadExecutor::~DefaultLocalThreadExecutor()
+{
+    // Ensure that no more tasks can be scheduled on this executor from now on.
+    getGuard()->terminate();
+    _queue.close();
+}
+
 size_t DefaultLocalThreadExecutor::count() const
 {
     return _queue.size();

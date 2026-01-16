@@ -17,6 +17,126 @@ namespace vanilo::tasker {
      */
     class TaskExecutor;
 
+    /// LifeCycleGuard | Atomic Gate
+    /// ============================================================================================
+
+    class LifeCycleGuard
+    {
+      public:
+        /**
+         * Attempts to increment the internal reference counter.
+         * If the guard is marked as "terminated," the method denies increment and returns false.
+         * Uses atomic operations to ensure thread safety and provides a double-check mechanism
+         * to handle potential races with the `terminate()` method.
+         *
+         * @return True if the increment is successful; false if the guard is terminated.
+         */
+        bool tryIncrement()
+        {
+            if (_isTerminated.load(std::memory_order_acquire)) {
+                return false;
+            }
+
+            _refs.fetch_add(1, std::memory_order_relaxed);
+
+            // Double-check after incrementing to handle the race with terminate()
+            if (_isTerminated.load(std::memory_order_acquire)) {
+                decrement();
+                return false;
+            }
+
+            return true;
+        }
+
+        /**
+         * Decrements the internal reference counter. This is used to track when
+         * an execution context releases the guard.
+         */
+        void decrement()
+        {
+            _refs.fetch_sub(1, std::memory_order_release);
+        }
+
+        /**
+         * Terminates the guard by setting an internal flag, indicating that no new increments
+         * should be allowed. Waits until all currently active references have dropped to zero before
+         * returning, ensuring that the guarded resource is fully drained.
+         */
+        void terminate()
+        {
+            _isTerminated.store(true, std::memory_order_release);
+            // Spin-wait until all in-flight entries are finished
+            while (_refs.load(std::memory_order_acquire) > 0) {
+                std::this_thread::yield();
+            }
+        }
+
+        /**
+         * RAII wrapper for guard acquisition.
+         */
+        struct Lock
+        {
+            friend class LifeCycleGuard;
+
+            Lock() = default;
+
+            Lock(Lock&& other) noexcept: _guard{other._guard}
+            {
+                other._guard = nullptr;
+            }
+
+            Lock& operator=(Lock&& other) noexcept
+            {
+                if (this != &other) {
+                    if (_guard) {
+                        _guard->decrement();
+                    }
+                    _guard = other._guard;
+                    other._guard = nullptr;
+                }
+                return *this;
+            }
+
+            ~Lock()
+            {
+                if (_guard) {
+                    _guard->decrement();
+                }
+            }
+
+            explicit operator bool() const
+            {
+                return _guard != nullptr;
+            }
+
+            Lock(const Lock&) = delete;
+            Lock& operator=(const Lock&) = delete;
+
+          private:
+            explicit Lock(LifeCycleGuard* guard): _guard{guard}
+            {
+            }
+
+            LifeCycleGuard* _guard{nullptr};
+        };
+
+        /**
+         * Attempts to acquire the lock using RAII.
+         * @return A Lock object that evaluates to true if acquisition was successful, false otherwise.
+         */
+        Lock acquire()
+        {
+            if (tryIncrement()) {
+                return Lock{this};
+            }
+            return Lock{};
+        }
+
+      private:
+        std::atomic<int> _refs{0};
+        std::atomic<bool> _isTerminated{false};
+    };
+
     /// Task interface
     /// ============================================================================================
 
@@ -69,7 +189,15 @@ namespace vanilo::tasker {
     class TaskExecutor
     {
       public:
-        virtual ~TaskExecutor() = default;
+        TaskExecutor() = default;
+        TaskExecutor(const TaskExecutor& other) = delete;
+
+        virtual ~TaskExecutor()
+        {
+            _guard->terminate();
+        }
+
+        TaskExecutor& operator=(const TaskExecutor& other) = delete;
 
         /**
          * @return The current number of tasks in the queue.
@@ -77,10 +205,22 @@ namespace vanilo::tasker {
         [[nodiscard]] virtual size_t count() const = 0;
 
         /**
+         * Retrieves the lifecycle guard associated with the task executor.
+         * @return A shared pointer to the lifecycle guard.
+         */
+        [[nodiscard]] std::shared_ptr<LifeCycleGuard> getGuard() const
+        {
+            return _guard;
+        }
+
+        /**
          * Submits the task for the execution on the task executor.
          * @param task The task to be executed on the task executor.
          */
         virtual void submit(std::unique_ptr<Task> task) = 0;
+
+      private:
+        std::shared_ptr<LifeCycleGuard> _guard = std::make_shared<LifeCycleGuard>();
     };
 
     /// LocalThreadExecutor interface
@@ -362,14 +502,17 @@ namespace vanilo::tasker {
             friend class BaseTask;
 
           public:
-            explicit ChainableTask(TaskExecutor* executor): _executor{executor}
+            explicit ChainableTask(TaskExecutor* executor): _executor{executor}, _guard{executor ? executor->getGuard() : nullptr}
             {
             }
 
             ChainableTask(ChainableTask&& other) noexcept
-                : _executor{other._executor}, _token{std::move(other._token)}, _next{std::move(other._next)}
+                : _cancelled{other._cancelled.load()}, _executor{other._executor}, _guard{std::move(other._guard)},
+                  _token{std::move(other._token)}, _next{std::move(other._next)}
             {
             }
+
+            ~ChainableTask() override = default;
 
             [[nodiscard]] virtual std::unique_ptr<ChainableTask> clone() const = 0;
 
@@ -391,6 +534,14 @@ namespace vanilo::tasker {
             void cancel() noexcept override
             {
                 _cancelled.store(true, std::memory_order_release);
+            }
+
+            [[nodiscard]] LifeCycleGuard::Lock acquireGuard() const
+            {
+                if (_guard) {
+                    return _guard->acquire();
+                }
+                return {};
             }
 
             [[nodiscard]] bool isCanceled() const noexcept
@@ -431,8 +582,17 @@ namespace vanilo::tasker {
             }
 
           protected:
+            ChainableTask(TaskExecutor* executor, std::shared_ptr<LifeCycleGuard> guard): _executor{executor}, _guard{std::move(guard)}
+            {
+            }
+
             [[nodiscard]] virtual bool isPromised() const noexcept = 0;
             virtual void handleException(std::exception_ptr exPtr) = 0;
+
+            [[nodiscard]] std::shared_ptr<LifeCycleGuard> getGuard() const
+            {
+                return _guard;
+            }
 
             void scheduleNext()
             {
@@ -445,9 +605,16 @@ namespace vanilo::tasker {
                     return;
                 }
 
-                const auto executor = _next->_executor;
-                _next->_token = std::move(_token);
-                executor->submit(std::move(_next));
+                if (const auto nextGuard = _next->_guard) {
+                    if (const auto lock = nextGuard->acquire()) {
+                        const auto executor = _next->_executor;
+                        _next->_token = std::move(_token);
+                        executor->submit(std::move(_next));
+                        return;
+                    }
+                }
+
+                _next.reset();
             }
 
             [[nodiscard]] bool hasNext() const
@@ -469,6 +636,7 @@ namespace vanilo::tasker {
           private:
             std::atomic_bool _cancelled{false};
             TaskExecutor* _executor;
+            std::shared_ptr<LifeCycleGuard> _guard;
             CancellationToken _token;
             std::unique_ptr<ChainableTask> _next;
         };
@@ -481,6 +649,11 @@ namespace vanilo::tasker {
         {
           public:
             explicit ParameterizedChainableTask(TaskExecutor* executor): ChainableTask{executor}
+            {
+            }
+
+            ParameterizedChainableTask(TaskExecutor* executor, std::shared_ptr<LifeCycleGuard> guard)
+                : ChainableTask{executor, std::move(guard)}
             {
             }
 
@@ -524,8 +697,8 @@ namespace vanilo::tasker {
             }
 
             BaseTask(const BaseTask& other)
-                : ParameterizedChainableTask<Arg>{other.getExecutor()}, _task{other._task}, _errorExecutor{other._errorExecutor},
-                  _errorMetadata{other._errorMetadata}, _errorHandler{other._errorHandler}
+                : ParameterizedChainableTask<Arg>{other.getExecutor(), other.getGuard()}, _task{other._task},
+                  _errorExecutor{other._errorExecutor}, _errorMetadata{other._errorMetadata}, _errorHandler{other._errorHandler}
             {
                 this->setToken(other.getToken());
             }
