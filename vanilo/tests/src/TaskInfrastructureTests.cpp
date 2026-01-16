@@ -214,8 +214,9 @@ TEST_CASE("Periodic task builder does not have getFuture", "[task][periodic]")
     SUCCEED("PeriodicBuilder returned");
 }
 
-TEST_CASE("Future throws OperationCanceledException when executor destroyed before execution", "[executor][future]")
+TEST_CASE("Future throws when executor destroyed before execution", "[executor][future]")
 {
+    // Future throws OperationCanceledException when executor destroyed before execution
     auto executor = ThreadPoolExecutor::create(1);
     auto future = Task::run(executor.get(), CancellationToken::none(), 100ms, [] { return 123; }).getFuture();
 

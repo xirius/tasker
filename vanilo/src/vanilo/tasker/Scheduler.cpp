@@ -2,6 +2,7 @@
 
 #include <memory>
 
+using namespace vanilo::concurrent;
 using namespace vanilo::tasker;
 
 namespace {
@@ -215,6 +216,9 @@ void TaskScheduler::worker()
         if (!current->isCanceled() && !current->getToken().isCancellationRequested()) {
             try {
                 current->run();
+            }
+            catch (const concurrent::OperationCanceledException&) { // NOSONAR
+                // Ignore
             }
             catch (const std::exception& ex) {
                 TRACE("An unhandled exception occurred during execution of the task. Message: %s", ex.what());
