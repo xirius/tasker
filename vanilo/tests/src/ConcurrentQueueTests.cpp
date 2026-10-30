@@ -224,10 +224,11 @@ TEST_CASE("ConcurrentQueue destruction while waiting", "[concurrent][ConcurrentQ
     std::atomic<bool> thread_started{false};
     std::atomic<bool> wait_finished{false};
 
-    std::thread consumer([&queue, &thread_started, &wait_finished]() {
+    // The thread uses the raw pointer: reading the unique_ptr while reset() writes it would itself be a data race.
+    std::thread consumer([rawQueue = queue.get(), &thread_started, &wait_finished]() {
         thread_started = true;
         int val;
-        const bool result = queue->waitDequeue(val);
+        const bool result = rawQueue->waitDequeue(val);
         wait_finished = true;
         (void)result;
     });
@@ -250,9 +251,10 @@ TEST_CASE("ConcurrentQueue destruction with many waiters", "[concurrent][Concurr
     std::atomic<int> completedWaiters{0};
 
     for (int i = 0; i < numWaiters; ++i) {
-        waiters.emplace_back([&queue, &completedWaiters] {
+        // Raw pointer for the same reason as above: the unique_ptr itself is reset concurrently.
+        waiters.emplace_back([rawQueue = queue.get(), &completedWaiters] {
             // Should return false when the queue is destroyed/closed
-            if (int val; !queue->waitDequeue(val)) {
+            if (int val; !rawQueue->waitDequeue(val)) {
                 ++completedWaiters;
             }
         });
