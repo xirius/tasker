@@ -1,118 +1,100 @@
-# Tasker library
-set(TARGET_NAME "Vanilo")
-set(TARGET_ALIAS "${TARGET_NAME}::${TARGET_NAME}")
+# Vanilo: the tasker library (Vanilo::Vanilo).
 
-# Use POSIX threads
-set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+include(GNUInstallDirs)
+
 find_package(Threads REQUIRED)
 
-# Sanitizer flags for a TAAN build configuration
-set(CMAKE_CXX_FLAGS_ASAN "-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined")
-set(CMAKE_C_FLAGS_ASAN "-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined")
-set(CMAKE_LINKER_FLAGS_ASAN "-fsanitize=address,undefined")
+file(GLOB_RECURSE VANILO_SOURCES CONFIGURE_DEPENDS
+    "src/*.cpp" "src/*.h" "src/*.hpp"
+    "private/*.h" "private/*.hpp"
+    "include/*.h" "include/*.hpp")
 
-# ThreadSanitizer flags for a TSAN build configuration
-set(CMAKE_CXX_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread")
-set(CMAKE_C_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread")
-set(CMAKE_EXE_LINKER_FLAGS_TSAN "-fsanitize=thread")
-set(CMAKE_SHARED_LINKER_FLAGS_TSAN "-fsanitize=thread")
+add_library(Vanilo ${VANILO_SOURCES})
+add_library(Vanilo::Vanilo ALIAS Vanilo)
 
-# Sanitizer flags for a TSAN + build configuration | Clang
-#set(CMAKE_CXX_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread,undefined")
-#set(CMAKE_C_FLAGS_TSAN "-O1 -g -fno-omit-frame-pointer -fsanitize=thread,undefined")
-#set(CMAKE_EXE_LINKER_FLAGS_TSAN "-fsanitize=thread,undefined")
-#set(CMAKE_SHARED_LINKER_FLAGS_TSAN "-fsanitize=thread,undefined")
-
-# Defining library
-add_library("${TARGET_NAME}" "")
-add_library("${TARGET_ALIAS}" ALIAS "${TARGET_NAME}")
-
-# Export header
-include("GenerateExportHeader")
-string(TOUPPER "${TARGET_NAME}_STATIC_DEFINE" TARGET_EXPORT_DEFINE)
-string(TOUPPER "${TARGET_NAME}_EXPORT" TARGET_EXPORT)
-string(TOLOWER "_${TARGET_NAME}_export.h" TARGET_EXPORT_FILE)
-
-generate_export_header("${TARGET_NAME}"
-    BASE_NAME "${TARGET_NAME}"
-    EXPORT_MACRO_NAME "${TARGET_EXPORT}"
-    EXPORT_FILE_NAME "${TARGET_EXPORT_FILE}")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_EXPORT_FILE}" DESTINATION "include")
-
-# Folder structure
-set(PUBLIC_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-set(PRIVATE_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/private")
-set(SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-
-# Collect source files
-file(GLOB_RECURSE SOURCES FOLLOW_SYMLINKS CONFIGURE_DEPENDS
-    "${SOURCE_DIR}/*.cpp"
-    "${SOURCE_DIR}/*.hpp"
-    "${SOURCE_DIR}/*.h"
-    "${PRIVATE_HEADER_DIR}/*.h"
-    "${PRIVATE_HEADER_DIR}/*.hpp"
-    "${PUBLIC_HEADER_DIR}/*.h"
-    "${PUBLIC_HEADER_DIR}/*.hpp")
-
-if(NOT BUILD_SHARED_LIBS)
-    set_target_properties("${TARGET_NAME}" PROPERTIES COMPILE_FLAGS "-D${TARGET_EXPORT_DEFINE}")
-    set_target_properties(${TARGET_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
-endif()
-
-set_target_properties("${PROJECT_NAME}" PROPERTIES
+# C++17 is the minimum; consumers may build it with a newer standard.
+target_compile_features(Vanilo PUBLIC cxx_std_17)
+set_target_properties(Vanilo PROPERTIES
+    CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON  # a static Vanilo can be linked into shared libraries
+    COMPILE_WARNING_AS_ERROR ${TASKER_WARNINGS_AS_ERRORS}
     DEBUG_POSTFIX ".d"
-    RELEASE_POSTFIX ""
     MINSIZEREL_POSTFIX ".mr"
     RELWITHDEBINFO_POSTFIX ".rd")
 
-# Set RPATH
-set_target_properties(${TARGET_NAME} PROPERTIES LINK_FLAGS "-Wl,-rpath,./ -Wl,-rpath,../${LIBRARY_FOLDER}")
+target_include_directories(Vanilo
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"  # generated export header
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/private"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-# Set common compile options
-target_compile_options(${TARGET_NAME} PRIVATE -Werror)
+target_link_libraries(Vanilo PUBLIC Threads::Threads atomic)
 
-# Add include directories of private and public headers
-target_include_directories(${TARGET_NAME}
-    PUBLIC "$<INSTALL_INTERFACE:include>"
-    PUBLIC $<BUILD_INTERFACE:${PUBLIC_HEADER_DIR}>
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-    PRIVATE $<BUILD_INTERFACE:${PRIVATE_HEADER_DIR}>
-    PRIVATE $<BUILD_INTERFACE:${SOURCE_DIR}>)
+include(GenerateExportHeader)
+generate_export_header(Vanilo
+    BASE_NAME Vanilo
+    EXPORT_MACRO_NAME VANILO_EXPORT
+    EXPORT_FILE_NAME _vanilo_export.h)
 
-target_sources(${TARGET_NAME} PRIVATE ${SOURCES})
-target_link_libraries("${TARGET_NAME}" PUBLIC Threads::Threads atomic)
+get_target_property(VANILO_TYPE Vanilo TYPE)
+if(VANILO_TYPE STREQUAL "STATIC_LIBRARY")
+    target_compile_definitions(Vanilo PUBLIC VANILO_STATIC_DEFINE)
+endif()
 
-# Build Unit Tests
-if(BUILD_UNIT_TESTS)
-    set(TARGET_UT_NAME "${TARGET_NAME}.tests")
+# Unit tests
+if(TASKER_BUILD_TESTS)
+    include(FetchContent)
+    FetchContent_Declare(Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.16.1
+        GIT_SHALLOW TRUE
+        SYSTEM
+        FIND_PACKAGE_ARGS 3 CONFIG)
 
-    # Adjust unit test binary output folder
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIRECTORY}/${UT_BIN_FOLDER})
+    block()
+        set(BUILD_SHARED_LIBS OFF)
+        FetchContent_MakeAvailable(Catch2)
+    endblock()
 
-    # Collect unit test source files
-    file(GLOB_RECURSE UT_SOURCES FOLLOW_SYMLINKS CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
+    file(GLOB_RECURSE VANILO_TEST_SOURCES CONFIGURE_DEPENDS "tests/*.cpp" "tests/*.h")
 
-    # Remove main.cpp from sources
-    list(FILTER SOURCES EXCLUDE REGEX ".*/main.cpp$")
+    add_executable(Vanilo.tests ${VANILO_TEST_SOURCES})
+    target_link_libraries(Vanilo.tests PRIVATE Vanilo::Vanilo Catch2::Catch2WithMain)
+    target_include_directories(Vanilo.tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/private"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    set_target_properties(Vanilo.tests PROPERTIES
+        CXX_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/tests"
+        COMPILE_WARNING_AS_ERROR ${TASKER_WARNINGS_AS_ERRORS})
 
-    # Create unit test executable
-    add_executable(${TARGET_UT_NAME} ${UT_SOURCES} ${SOURCES})
-    target_link_libraries(${TARGET_UT_NAME} PRIVATE ${TARGET_ALIAS})
+    add_test(NAME Vanilo.tests COMMAND Vanilo.tests)
+endif()
 
-    # Set common compile options
-    target_compile_options(${TARGET_UT_NAME} PRIVATE -Werror)
+# Install rules and CMake package, so consumers can also use find_package(Vanilo)
+if(TASKER_INSTALL)
+    include(CMakePackageConfigHelpers)
 
-    # Set include directories of private and public headers
-    target_include_directories(${TARGET_UT_NAME} PRIVATE ${INCLUDE_DIRS} ${PRIVATE_HEADER_DIR})
+    set(VANILO_CONFIG_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/Vanilo")
 
-    # Set common compile features
-    target_compile_features(${TARGET_UT_NAME} PRIVATE "cxx_std_${CMAKE_CXX_STANDARD}")
+    install(TARGETS Vanilo EXPORT VaniloTargets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/_vanilo_export.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+    install(EXPORT VaniloTargets NAMESPACE Vanilo:: DESTINATION "${VANILO_CONFIG_DIR}")
 
-    # Set RPATH
-    set_target_properties(${TARGET_UT_NAME} PROPERTIES LINK_FLAGS "-Wl,-rpath,./ -Wl,-rpath,../${LIBRARY_FOLDER}")
-
-    # Add Catch2 framework
-    target_link_libraries(${TARGET_UT_NAME} PRIVATE Catch2::Catch2WithMain)
+    configure_package_config_file("${PROJECT_SOURCE_DIR}/cmake/VaniloConfig.cmake.in"
+        "${PROJECT_BINARY_DIR}/VaniloConfig.cmake"
+        INSTALL_DESTINATION "${VANILO_CONFIG_DIR}")
+    write_basic_package_version_file("${PROJECT_BINARY_DIR}/VaniloConfigVersion.cmake"
+        COMPATIBILITY SameMajorVersion)
+    install(FILES
+        "${PROJECT_BINARY_DIR}/VaniloConfig.cmake"
+        "${PROJECT_BINARY_DIR}/VaniloConfigVersion.cmake"
+        DESTINATION "${VANILO_CONFIG_DIR}")
 endif()

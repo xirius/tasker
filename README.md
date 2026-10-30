@@ -1,24 +1,27 @@
 # Vanilo Tasker
 
-A modern, simple C++17 task runner library and playground. This repository contains the Vanilo C++ library (Vanilo::Vanilo), unit tests powered by Catch2, and a minimal example application. It is built with CMake and uses Git to fetch the Catch2 test framework.
+A modern, simple C++17 task runner library and playground. This repository contains the Vanilo C++ library (Vanilo::Vanilo), unit tests powered by Catch2, and a minimal example application. It is built with CMake presets.
 
 Current status: library and tests build and run; example target compiles. Some documentation items are still TODO and flagged below.
 
 
 ## Stack and Targets
-- Language: C++17
-- Build system: CMake (>= 3.17)
-- Package/dependency management: CMake FetchContent for Catch2; system Threads/atomic
-- Test framework: Catch2 v3 (fetched automatically)
+- Language: C++17 (minimum; consumers may build it with a newer standard)
+- Build system: CMake (>= 3.25) with presets
+- Dependencies: system Threads/atomic; Catch2 v3 for the tests (found with find_package, otherwise fetched)
 - Primary targets:
   - Library: Vanilo (alias: Vanilo::Vanilo)
   - Tests executable: Vanilo.tests (Catch2-based)
   - Example executable: Example01
 
-CMake options (configure-time):
-- BUILD_SHARED_LIBS: Build shared library [default: ON]
-- BUILD_UNIT_TESTS: Build unit tests [default: ON]
-- BUILD_EXAMPLES: Build examples [default: ON]
+CMake options (configure-time). The TASKER_* options default to ON only when tasker is the top-level project,
+so a project that includes it with FetchContent or add_subdirectory just gets the Vanilo::Vanilo target:
+- TASKER_BUILD_TESTS: Build the unit tests
+- TASKER_BUILD_EXAMPLES: Build the examples
+- TASKER_WARNINGS_AS_ERRORS: Treat compiler warnings as errors
+- TASKER_INSTALL: Generate install rules and the Vanilo CMake package
+- TASKER_SANITIZER: `address` (with UBSan), `thread`, or empty [default: empty]
+- BUILD_SHARED_LIBS: Build Vanilo as a shared library [default when top-level: ON; otherwise the consumer decides]
 
 
 ## Overview
@@ -31,52 +34,44 @@ Key entry points:
 
 
 ## Requirements
-- CMake >= 3.17
+- CMake >= 3.25 and Ninja (the presets use the Ninja generator)
 - A C++17-compliant compiler (e.g., GCC 9+, Clang 10+, MSVC 2019+)
-- Git (required by the build to fetch Catch2)
+- Git (to fetch Catch2 when it isn't installed)
 - POSIX threads and atomic support (Threads::Threads and atomic are linked)
-
-On Linux, make sure build-essential/clang, cmake, and git are installed. On Windows, use Visual Studio 2019+ with CMake integration.
 
 
 ## Build and Run
-You can build with standard CMake, or use the provided CLion profiles described below.
+The presets build into `build/<preset>`: `debug`, `release`, `asan` (AddressSanitizer + UBSan) and `tsan` (ThreadSanitizer).
 
-### Standard CMake (any environment)
 ```sh
-# From repository root
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
-      -DBUILD_UNIT_TESTS=ON -DBUILD_EXAMPLES=ON
-cmake --build build --target Vanilo.tests
-# Run tests
-./build/bin/tests/Vanilo.tests
+# Configure, build and run the tests in one go
+cmake --workflow --preset debug
 
-# Build and run the example
-cmake --build build --target Example01
-./build/bin/Example01
+# Or step by step
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
+
+# Run the example
+./build/debug/bin/Example01
 ```
 
-### CLion/Preconfigured Profiles
-This repository already has CLion build directories with profiles:
-- Debug: /mnt/storage/dev/tasker/build-debug
-- Release: /mnt/storage/dev/tasker/build-release
-
-Example commands using those profiles:
-```sh
-# Build and run tests (Debug)
-cmake --build /mnt/storage/dev/tasker/build-debug --target Vanilo.tests && \
-/mnt/storage/dev/tasker/build-debug/bin/tests/Vanilo.tests
-
-# Build and run example (Debug)
-cmake --build /mnt/storage/dev/tasker/build-debug --target Example01 && \
-/mnt/storage/dev/tasker/build-debug/bin/Example01
+### Using tasker from another project
+```cmake
+include(FetchContent)
+FetchContent_Declare(tasker
+    GIT_REPOSITORY https://github.com/xirius/tasker.git
+    GIT_TAG <tag>
+    FIND_PACKAGE_ARGS NAMES Vanilo CONFIG)
+FetchContent_MakeAvailable(tasker)
+target_link_libraries(my_target PRIVATE Vanilo::Vanilo)
 ```
-The same layout applies for Release under build-release.
+Set `BUILD_SHARED_LIBS` around `FetchContent_MakeAvailable` (for example in a `block()`) to choose a static or shared Vanilo.
+An installed tasker (`cmake --install build/release --prefix <prefix>`) is found with `find_package(Vanilo CONFIG)`.
 
 
 ## Scripts
-No project-specific scripts are present at this time. All tasks are handled via CMake targets.
-- TODO: add convenience scripts (e.g., scripts/test.sh) if needed in the future.
+No project-specific scripts are needed: the CMake presets cover building, testing and the sanitizer runs.
 
 
 ## Environment Variables
@@ -85,52 +80,36 @@ There are currently no required environment variables for building or running.
 
 
 ## Tests
-- Test target: Vanilo.tests
-- Framework: Catch2 v3 (fetched during configure via FetchContent)
+- Test target: Vanilo.tests, registered with CTest
+- Framework: Catch2 v3
 - Location: vanilo/tests/src/*.cpp and test config in vanilo/tests/_unit_test_config.cpp
 
-Run all tests with:
 ```sh
-# Using a generic build dir
-./build/bin/tests/Vanilo.tests
-
-# Or with CLion Debug profile
-/mnt/storage/dev/tasker/build-debug/bin/tests/Vanilo.tests
-```
-
-You can pass Catch2 arguments after a `--` separator. Examples:
-```sh
-./build/bin/tests/Vanilo.tests --success
-./build/bin/tests/Vanilo.tests [TaskRunner]
+ctest --preset debug                      # all tests
+./build/debug/bin/tests/Vanilo.tests      # or run directly
+./build/debug/bin/tests/Vanilo.tests "[ConcurrentQueue]"
+cmake --workflow --preset tsan            # under ThreadSanitizer
 ```
 
 
 ## Project Structure
 - CMakeLists.txt                 # Root build config and options
-- cmake/                         # CMake helper modules (e.g., Environment)
-- extern/catch/                  # FetchContent configuration for Catch2
+- CMakePresets.json              # debug, release, asan and tsan presets
+- cmake/VaniloConfig.cmake.in    # Template for the installed Vanilo CMake package
 - examples/
   - example1/
     - CMakeLists.txt
     - main.cpp                   # Example01 entry point
 - vanilo/
-  - CMakeLists.txt               # Library + tests wiring
+  - CMakeLists.txt               # Library, tests and install rules
   - include/vanilo/              # Public headers
   - private/vanilo/              # Private headers/impl details
   - src/vanilo/                  # Library sources
   - tests/
     - _unit_test_config.cpp
     - src/*.cpp                  # Catch2 test cases
-- build-debug/, build-release/   # Existing CLion build trees (generated)
 - LICENSE                        # MIT License
 - README.md                      # This file
-
-
-## Installation and Use
-This project currently focuses on development and testing. Installation rules for headers are partially defined (export header is installed), but a complete install/package configuration is not finalized.
-- TODO: add proper install targets and packaging (e.g., CPack or export targets) when ready.
-
-Consumers can link against the target Vanilo::Vanilo from the build tree for now.
 
 
 ## License

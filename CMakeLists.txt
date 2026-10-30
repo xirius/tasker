@@ -1,33 +1,50 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.25)
 project(Vanilo VERSION 1.0 DESCRIPTION "Vanilo Tasker C++" LANGUAGES CXX)
 
-if(${CMAKE_VERSION} VERSION_LESS 3.17)
-    cmake_policy(VERSION ${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION})
+if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
+    message(FATAL_ERROR "In-source builds are not allowed. Use a preset (cmake --preset debug) or -B <build-dir>.")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+# Tests, examples, strict warnings and install rules are for working on tasker itself. They are
+# off by default when tasker is part of another project (FetchContent or add_subdirectory),
+# which then only gets the Vanilo::Vanilo target and decides BUILD_SHARED_LIBS itself.
+option(TASKER_BUILD_TESTS "Build the unit tests" ${PROJECT_IS_TOP_LEVEL})
+option(TASKER_BUILD_EXAMPLES "Build the examples" ${PROJECT_IS_TOP_LEVEL})
+option(TASKER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ${PROJECT_IS_TOP_LEVEL})
+option(TASKER_INSTALL "Generate install rules and a Vanilo CMake package" ${PROJECT_IS_TOP_LEVEL})
+set(TASKER_SANITIZER "" CACHE STRING "Build tasker with a sanitizer: address (with UBSan), thread, or empty")
+set_property(CACHE TASKER_SANITIZER PROPERTY STRINGS "" address thread)
 
-# Options
-option(BUILD_SHARED_LIBS "Build shared library [default: true]." True)
-option(BUILD_UNIT_TESTS "Build unit tests [default: true]" True)
-option(BUILD_EXAMPLES "Build examples [default: true]" True)
+if(PROJECT_IS_TOP_LEVEL)
+    option(BUILD_SHARED_LIBS "Build Vanilo as a shared library" ON)
 
-# Building with cmake verbose
-set(CMAKE_VERBOSE_MAKEFILE OFF)
+    if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    endif()
 
-# Git is required
-find_package(Git REQUIRED)
+    # Executables in bin/, libraries in bin/lib/, tests in bin/tests/, with $ORIGIN-relative RPATHs.
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/lib")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/lib")
+    set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
+endif()
 
-# Set module path
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+if(TASKER_SANITIZER STREQUAL "address")
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+elseif(TASKER_SANITIZER STREQUAL "thread")
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+elseif(TASKER_SANITIZER)
+    message(FATAL_ERROR "TASKER_SANITIZER must be address, thread or empty, not '${TASKER_SANITIZER}'.")
+endif()
 
-# cmake scripts
-include(Environment)
+if(TASKER_BUILD_TESTS)
+    enable_testing()
+endif()
 
-# Add modules
-add_subdirectory(extern)
 add_subdirectory(vanilo)
-add_subdirectory(examples)
+
+if(TASKER_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
