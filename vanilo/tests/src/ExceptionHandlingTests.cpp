@@ -183,3 +183,42 @@ TEST_CASE("The default unhandled-exception handler writes to stderr", "[exceptio
     REQUIRE_THAT(capture.text(), Catch::Matchers::ContainsSubstring("something broke"));
     REQUIRE_THAT(capture.text(), Catch::Matchers::ContainsSubstring("non-standard"));
 }
+
+TEST_CASE("A handler whose executor shuts down before running it runs inline", "[exception][shutdown]")
+{
+    const auto executor = ManualExecutor::create();
+    auto handlerExecutor = ManualExecutor::create();
+    std::thread::id handlerThread;
+    bool recovered = false;
+
+    SECTION("onError")
+    {
+        Task::run(executor.get(), [] { throw std::runtime_error{"failed"}; })
+            .onError(handlerExecutor.get(), [&handlerThread](const std::exception&) {
+            handlerThread = std::this_thread::get_id();
+        }).submit();
+        executor->runPending();
+        REQUIRE(handlerExecutor->pendingCount() == 1);
+
+        handlerExecutor.reset(); // runs the queued handler on this thread instead of dropping it
+        REQUIRE(handlerThread == std::this_thread::get_id());
+    }
+
+    SECTION("recover")
+    {
+        auto handle = Task::run(executor.get(), []() -> int { throw std::runtime_error{"failed"}; })
+                          .recover(handlerExecutor.get(), [&recovered](const std::exception&) {
+            recovered = true;
+            return 1;
+        }).then(executor.get(), [](const int value) {
+            return value + 1;
+        }).submit();
+        executor->runPending();
+        REQUIRE(handlerExecutor->pendingCount() == 1);
+
+        handlerExecutor.reset(); // the recovery runs, and the chain goes on
+        executor->runPending();
+        REQUIRE(recovered);
+        REQUIRE(handle.get() == 2);
+    }
+}

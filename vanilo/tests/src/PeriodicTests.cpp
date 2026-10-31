@@ -169,3 +169,73 @@ TEST_CASE("A periodic task starts after its initial delay", "[periodic]")
     handle.cancel();
     REQUIRE(firstRun >= 30);
 }
+
+namespace {
+    // A task whose copies fail after a while: each periodic run is a copy.
+    struct FailingCopies
+    {
+        std::shared_ptr<std::atomic<int>> copies = std::make_shared<std::atomic<int>>(0);
+        std::shared_ptr<std::atomic<int>> runs = std::make_shared<std::atomic<int>>(0);
+
+        FailingCopies() = default;
+        FailingCopies(FailingCopies&&) noexcept = default;
+
+        FailingCopies(const FailingCopies& other): copies{other.copies}, runs{other.runs}
+        {
+            if (++*copies % 2 == 0) {
+                throw std::runtime_error{"copy failed"};
+            }
+        }
+
+        void operator()() const
+        {
+            ++*runs;
+        }
+    };
+} // namespace
+
+TEST_CASE("A periodic run whose copy fails is skipped and reported; the series goes on", "[periodic][exception]")
+{
+    const vanilo::tests::UnhandledExceptions unhandled;
+    const auto executor = ManualExecutor::create();
+    FailingCopies task;
+    const auto runs = task.runs;
+
+    SECTION("fixed rate")
+    {
+        auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms}, std::move(task)).submit();
+        REQUIRE(waitFor([&] {
+            executor->runPending();
+            return *runs >= 2 && unhandled.messages().size() >= 2;
+        }));
+        handle.cancel();
+        handle.wait();
+    }
+
+    SECTION("fixed delay")
+    {
+        auto handle = Task::run(executor.get(), 0ms, FixedDelay{1ms}, std::move(task)).submit();
+        REQUIRE(waitFor([&] {
+            executor->runPending();
+            return *runs >= 2 && unhandled.messages().size() >= 2;
+        }));
+        handle.cancel();
+        handle.wait();
+    }
+
+    REQUIRE(unhandled.messages().front() == "copy failed");
+}
+
+TEST_CASE("A fixed-rate series with a very short period skips the periods it can't keep up with", "[periodic][fixed rate]")
+{
+    const auto executor = ManualExecutor::create();
+    std::atomic<int> runs{0};
+
+    auto handle = Task::run(executor.get(), 0ms, std::chrono::microseconds{1}, [&runs] { ++runs; }).submit();
+    REQUIRE(waitFor([&] {
+        executor->runPending();
+        return runs >= 100;
+    }));
+    handle.cancel();
+    REQUIRE(handle.waitFor(5s));
+}

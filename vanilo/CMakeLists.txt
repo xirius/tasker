@@ -83,7 +83,7 @@ if(TASKER_BUILD_TESTS)
             "$<TARGET_FILE:Vanilo.tests>"
             "$<$<STREQUAL:$<TARGET_PROPERTY:Vanilo,TYPE>,SHARED_LIBRARY>:-object=$<TARGET_FILE:Vanilo>>"
             "-instr-profile=${COVERAGE_DIR}/tests.profdata"
-            "-ignore-filename-regex=(/tests/|/_deps/|^/usr/)")
+            "-ignore-filename-regex=(/tests/|/_deps/|/catch2/|^/usr/)")
 
         add_custom_target(tasker-coverage
             COMMAND "${CMAKE_COMMAND}" -E rm -rf "${COVERAGE_DIR}"
