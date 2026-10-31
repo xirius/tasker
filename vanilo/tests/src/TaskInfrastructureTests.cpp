@@ -1,4 +1,5 @@
-#include <vanilo/concurrent/CancellationToken.h>
+#include "TestUtilities.h"
+
 #include <vanilo/tasker/Tasker.h>
 
 #include <catch2/catch_all.hpp>
@@ -10,168 +11,160 @@ using namespace std::chrono_literals;
 using namespace vanilo::tasker;
 using namespace vanilo::concurrent;
 
+// The shapes of a single task: with or without an argument and a result, with or without a handle.
+
 TEST_CASE("Run task: Result<Arg> without taking the result", "[task]")
 {
+    const auto executor = ManualExecutor::create();
     double result = 0;
-    auto task = [&result](const double value) { return result = 3.21 * value; };
-    const auto invokable = std::make_unique<internal::Invocable<decltype(task), double, double>>(nullptr, std::move(task));
 
-    invokable->setArgument(1.23);
-    invokable->run();
+    Task::run(executor.get(), [] { return 1.23; }).then(executor.get(), [&result](const double value) {
+        return result = 3.21 * value;
+    }).submit();
+    executor->runPending();
 
     REQUIRE(result == 1.23 * 3.21);
 }
 
-TEST_CASE("Run task: void<void> and take std::future<void>", "[task]")
+TEST_CASE("Run task: void<void> and take a TaskHandle<void>", "[task]")
 {
+    const auto executor = ManualExecutor::create();
     auto value = 0;
-    auto task = [&value]() { value = 1; };
-    const auto invokable = std::make_unique<internal::Invocable<decltype(task), void, void, true>>(nullptr, std::move(task));
-    auto future = invokable->getFuture();
 
-    invokable->run();
-    future.get();
+    auto handle = Task::run(executor.get(), [&value]() { value = 1; }).submit();
+    STATIC_REQUIRE(std::is_same_v<decltype(handle), TaskHandle<void>>);
+
+    executor->runPending();
+    handle.get();
 
     REQUIRE(value == 1);
 }
 
-TEST_CASE("Run task: void<Arg> and take std::future<void>", "[task]")
+TEST_CASE("Run task: void<Arg> and take a TaskHandle<void>", "[task]")
 {
+    const auto executor = ManualExecutor::create();
     auto value = 0;
-    auto task = [&value](const int val) { value = val; };
-    const auto invokable = std::make_unique<internal::Invocable<decltype(task), void, int, true>>(nullptr, std::move(task));
-    auto future = invokable->getFuture();
 
-    invokable->setArgument(1);
-    invokable->run();
-    future.get();
+    auto handle = Task::run(executor.get(), [] { return 1; }).then(executor.get(), [&value](const int val) { value = val; }).submit();
+
+    executor->runPending();
+    handle.get();
 
     REQUIRE(value == 1);
 }
 
-TEST_CASE("Run task: Result<void> and take std::future<Result>", "[task]")
+TEST_CASE("Run task: Result<void> and take a TaskHandle<Result>", "[task]")
 {
-    auto task = [] { return 123; };
-    const auto invokable = std::make_unique<internal::Invocable<decltype(task), int, void, true>>(nullptr, std::move(task));
-    auto future = invokable->getFuture();
+    const auto executor = ManualExecutor::create();
 
-    invokable->run();
+    auto handle = Task::run(executor.get(), [] { return 123; }).submit();
+    executor->runPending();
 
-    REQUIRE(future.get() == 123);
+    REQUIRE(handle.get() == 123);
 }
 
-TEST_CASE("Run task: Result<Arg> and take std::future<Result>", "[task]")
+TEST_CASE("Run task: Result<Arg> and take a TaskHandle<Result>", "[task]")
 {
-    auto task = [](const double value) { return value * 3.21; };
-    const auto invokable = std::make_unique<internal::Invocable<decltype(task), double, double, true>>(nullptr, std::move(task));
-    auto future = invokable->getFuture();
+    const auto executor = ManualExecutor::create();
 
-    invokable->setArgument(1.23);
-    invokable->run();
+    auto handle =
+        Task::run(executor.get(), [] { return 1.23; }).then(executor.get(), [](const double value) { return value * 3.21; }).submit();
+    executor->runPending();
 
-    REQUIRE(future.get() == 1.23 * 3.21);
+    REQUIRE(handle.get() == 1.23 * 3.21);
 }
 
-TEST_CASE("Run task: void<void> and take std::future<void> with exception", "[task]")
+TEST_CASE("Run task: void<void> and take a TaskHandle<void> with exception", "[task]")
 {
-    auto task = [] { throw std::invalid_argument{"Something happened"}; };
-    const auto invokable = std::make_unique<internal::Invocable<decltype(task), void, void, true>>(nullptr, std::move(task));
-    auto future = invokable->getFuture();
+    const auto executor = ManualExecutor::create();
 
-    invokable->run();
+    auto handle = Task::run(executor.get(), [] { throw std::invalid_argument{"Something happened"}; }).submit();
+    executor->runPending();
 
-    CHECK_THROWS_AS(future.get(), std::invalid_argument);
+    CHECK_THROWS_AS(handle.get(), std::invalid_argument);
 }
 
-TEST_CASE("Run task: void<void> chained and take std::future<void> with exception", "[task]")
+TEST_CASE("Run task: void<void> chained and take a TaskHandle<void> with exception", "[task]")
 {
-    auto task1 = [] { throw std::invalid_argument{"Something happened"}; };
-    auto task2 = [] { /* Ignore */ };
-    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task1), void, void>>(nullptr, std::move(task1));
-    auto invokable2 = std::make_unique<internal::Invocable<decltype(task2), void, void, true>>(nullptr, std::move(task2));
-    auto future = invokable2->getFuture();
+    const auto executor = ManualExecutor::create();
 
-    invokable1->setNext(std::move(invokable2));
-    invokable1->run();
+    auto handle = Task::run(executor.get(), [] { throw std::invalid_argument{"Something happened"}; })
+                      .then(executor.get(), [] { /* Ignore */ })
+                      .submit();
+    executor->runPending();
 
-    CHECK_THROWS_AS(future.get(), std::invalid_argument);
+    CHECK_THROWS_AS(handle.get(), std::invalid_argument);
 }
 
-TEST_CASE("Run task: void<void> convert to PromisedTask", "[task]")
+TEST_CASE("Run task: void<void> runs before it throws", "[task]")
 {
+    const auto executor = ManualExecutor::create();
     auto value = 0;
-    auto task = [&value] {
+
+    auto handle = Task::run(executor.get(), [&value] {
         value = 1;
         throw std::invalid_argument{"Something happened"};
-    };
-    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, void>>(nullptr, std::move(task));
-    const auto invokable2 = invokable1->toPromisedTask();
-    auto future = invokable2->getFuture();
+    }).submit();
+    executor->runPending();
 
-    invokable2->run();
-
-    CHECK_THROWS_AS(future.get(), std::invalid_argument);
+    CHECK_THROWS_AS(handle.get(), std::invalid_argument);
     REQUIRE(value == 1);
 }
 
-TEST_CASE("Run task: void<Arg> convert to PromisedTask", "[task]")
+TEST_CASE("Run task: void<Arg> runs before it throws", "[task]")
 {
+    const auto executor = ManualExecutor::create();
     auto value = 0;
-    auto task = [&value](const int val) {
+
+    auto handle = Task::run(executor.get(), [] { return 123; })
+                      .then(executor.get(), [&value](const int val) {
         value = val;
         throw std::invalid_argument{"Something happened"};
-    };
-    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), void, int>>(nullptr, std::move(task));
+    }).submit();
+    executor->runPending();
 
-    invokable1->setArgument(123);
-
-    const auto invokable2 = invokable1->toPromisedTask();
-    auto future = invokable2->getFuture();
-
-    invokable2->run();
-
-    CHECK_THROWS_AS(future.get(), std::invalid_argument);
+    CHECK_THROWS_AS(handle.get(), std::invalid_argument);
     REQUIRE(value == 123);
 }
 
-TEST_CASE("Run task: Result<void> convert to PromisedTask", "[task]")
+TEST_CASE("Run task: Result<void> with a handle taken later in the chain", "[task]")
 {
-    auto task = [] { return 123; };
-    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), int, void>>(nullptr, std::move(task));
-    const auto invokable2 = invokable1->toPromisedTask();
-    auto future = invokable2->getFuture();
+    const auto executor = ManualExecutor::create();
 
-    invokable2->run();
+    auto handle = Task::run(executor.get(), [] { return 123; }).then(executor.get(), [](const int value) { return value; }).submit();
+    executor->runPending(1);
+    REQUIRE_FALSE(handle.isReady()); // the second task is still queued
 
-    REQUIRE(future.get() == 123);
+    executor->runPending(1);
+    REQUIRE(handle.get() == 123);
 }
 
-TEST_CASE("Run task: Result<Arg> convert to PromisedTask", "[task]")
+TEST_CASE("Run task: Result<Arg> with the argument passed through a tuple", "[task]")
 {
-    auto task = [](const double arg) { return arg * 3.21; };
-    const auto invokable1 = std::make_unique<internal::Invocable<decltype(task), double, double>>(nullptr, std::move(task));
+    const auto executor = ManualExecutor::create();
 
-    invokable1->setArgument(1.23);
+    auto handle = Task::run(executor.get(), [] { return std::tuple{1.23, 2}; })
+                      .then(executor.get(), [](const double value, const int factor) {
+        return value * factor;
+    }).submit();
+    executor->runPending();
 
-    const auto invokable2 = invokable1->toPromisedTask();
-    auto future = invokable2->getFuture();
-
-    invokable2->run();
-
-    REQUIRE(future.get() == 1.23 * 3.21);
+    REQUIRE(handle.get() == 1.23 * 2);
 }
+
 TEST_CASE("Periodic task executes multiple times with chain", "[task][periodic]")
 {
     const auto executor = ThreadPoolExecutor::create(2);
-    const vanilo::concurrent::CancellationTokenSource tokenSource;
+    std::stop_source stopSource;
     std::atomic_int counter{0};
 
-    Task::run(executor.get(), tokenSource.token(), 10ms, 30ms, [] { return 1; }).then(executor.get(), [&counter](const int val) {
+    Task::run(executor.get(), stopSource.get_token(), 10ms, 30ms, [] { return 1; })
+        .then(executor.get(), [&counter](const int val) {
         counter += val;
-    });
+    }).submit();
 
     std::this_thread::sleep_for(150ms);
-    tokenSource.cancel();
+    stopSource.request_stop();
 
     // At 10ms, 40ms, 70ms, 100ms, 130ms. Should be ~5 executions.
     const int finalCount = counter.load();
@@ -179,52 +172,48 @@ TEST_CASE("Periodic task executes multiple times with chain", "[task][periodic]"
     CHECK(finalCount <= 8);
 }
 
-TEST_CASE("Periodic task is canceled by CancellationToken", "[task][periodic][cancel]")
+TEST_CASE("Periodic task is canceled by its stop token", "[task][periodic][cancel]")
 {
     const auto executor = ThreadPoolExecutor::create(2);
-    const vanilo::concurrent::CancellationTokenSource tokenSource;
+    std::stop_source stopSource;
     std::atomic_int counter{0};
 
-    Task::run(executor.get(), tokenSource.token(), 10ms, 20ms, [&counter] { ++counter; });
+    auto handle = Task::run(executor.get(), stopSource.get_token(), 10ms, 20ms, [&counter] { ++counter; }).submit();
 
     std::this_thread::sleep_for(50ms);
     // Should have run ~3 times (10, 30, 50)
     const int countBefore = counter.load();
     REQUIRE(countBefore >= 1);
 
-    tokenSource.cancel();
+    stopSource.request_stop();
+    REQUIRE(handle.waitFor(5s)); // the series ends at once, not at its next run
     std::this_thread::sleep_for(100ms);
 
     const int countAfter = counter.load();
-    // It should not have run anymore after cancellation
-    // Give some slack for tasks already in flight
+    // It should not have run anymore after cancellation; give some slack for a run already in flight
     CHECK(countAfter <= countBefore + 1);
 }
 
-TEST_CASE("Periodic task builder does not have getFuture", "[task][periodic]")
+TEST_CASE("A periodic task's handle reports the end of the series", "[task][periodic]")
 {
     const auto executor = ThreadPoolExecutor::create(1);
-    auto builder = Task::run(executor.get(), 1ms, 1ms, [] { /* Ignore */ });
+    auto handle = Task::run(executor.get(), 1ms, 1ms, [] { /* Ignore */ }).submit();
+    STATIC_REQUIRE(std::is_same_v<decltype(handle), TaskHandle<void>>);
 
-    // The following would not compile if getFuture existed, and we uncommented it
-    // builder.getFuture();
+    std::this_thread::sleep_for(20ms);
+    REQUIRE_FALSE(handle.isReady());
 
-    std::this_thread::sleep_for(1s);
-    // We check that we got a PeriodicBuilder
-    SUCCEED("PeriodicBuilder returned");
+    handle.cancel();
+    REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
 }
 
-TEST_CASE("Future throws when executor destroyed before execution", "[executor][future]")
+TEST_CASE("A handle throws when the executor is destroyed before the task runs", "[executor][handle]")
 {
-    // Future throws OperationCanceledException when executor destroyed before execution
     auto executor = ThreadPoolExecutor::create(1);
-    auto future = Task::run(executor.get(), CancellationToken::none(), 100ms, [] { return 123; }).getFuture();
+    auto handle = Task::run(executor.get(), 100ms, [] { return 123; }).submit();
 
-    // Destroy the executor immediately
+    // Destroy the executor before the delay has passed
     executor.reset();
 
-    // Wait for the delay to pass + some buffer
-    std::this_thread::sleep_for(200ms);
-
-    REQUIRE_THROWS_AS(future.get(), OperationCanceledException);
+    REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
 }

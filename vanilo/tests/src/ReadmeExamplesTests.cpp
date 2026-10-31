@@ -1,6 +1,6 @@
-#include <vanilo/tasker/Tasker.h>
-
 #include "TestUtilities.h"
+
+#include <vanilo/tasker/Tasker.h>
 
 #include <catch2/catch_all.hpp>
 
@@ -20,7 +20,7 @@ TEST_CASE("README: the introduction example", "[readme]")
 {
     auto pool = ThreadPoolExecutor::create();
 
-    auto answer = Task::run(pool.get(), [] { return 6; }).then(pool.get(), [](int value) { return value * 7; }).getFuture();
+    auto answer = Task::run(pool.get(), [] { return 6; }).then(pool.get(), [](int value) { return value * 7; }).submit();
 
     REQUIRE(answer.get() == 42);
 }
@@ -31,24 +31,24 @@ TEST_CASE("README: executors", "[readme]")
     pool->resize(8).wait();
     REQUIRE(pool->threadCount() == 8);
 
-    auto local = LocalThreadExecutor::create();
-    REQUIRE(local->process(10) == 0);
+    auto loop = ManualExecutor::create();
+    REQUIRE(loop->runPending(10) == 0);
 }
 
-TEST_CASE("README: an event loop on a LocalThreadExecutor", "[readme]")
+TEST_CASE("README: an event loop on a ManualExecutor", "[readme]")
 {
-    auto local = LocalThreadExecutor::create();
-    CancellationTokenSource stop;
+    auto loop = ManualExecutor::create();
+    std::stop_source stop;
     std::atomic<bool> ran{false};
 
     std::thread producer{[&] {
-        Task::run(local.get(), [&ran, &stop] {
+        Task::post(loop.get(), [&ran, &stop] {
             ran = true;
-            stop.cancel(); // ends the loop below
+            stop.request_stop(); // ends the loop below
         });
     }};
 
-    local->process(stop.token());
+    loop->runUntil(stop.get_token());
     producer.join();
 
     REQUIRE(ran);
@@ -56,11 +56,11 @@ TEST_CASE("README: an event loop on a LocalThreadExecutor", "[readme]")
 
 TEST_CASE("README: arguments are copied, std::ref changes in place", "[readme]")
 {
-    auto local = LocalThreadExecutor::create();
+    auto loop = ManualExecutor::create();
     int counter = 0;
 
-    Task::run(local.get(), [](int& value, int step) { value += step; }, std::ref(counter), 5);
-    local->process(1);
+    Task::post(loop.get(), [](int& value, int step) { value += step; }, std::ref(counter), 5);
+    loop->runPending();
 
     REQUIRE(counter == 5);
 }
@@ -79,11 +79,11 @@ namespace {
 
 TEST_CASE("README: member functions on an existing object", "[readme]")
 {
-    auto local = LocalThreadExecutor::create();
+    auto loop = ManualExecutor::create();
     Thermostat thermostat;
 
-    Task::run(local.get(), &Thermostat::setTarget, &thermostat, 21.5);
-    local->process(1);
+    Task::post(loop.get(), &Thermostat::setTarget, &thermostat, 21.5);
+    loop->runPending();
 
     REQUIRE(thermostat.target == 21.5);
 }
@@ -91,16 +91,16 @@ TEST_CASE("README: member functions on an existing object", "[readme]")
 TEST_CASE("README: a chain across executors", "[readme]")
 {
     auto pool = ThreadPoolExecutor::create(2);
-    auto local = LocalThreadExecutor::create();
+    auto loop = ManualExecutor::create();
     auto readSensor = [] { return 22.5; };
 
-    auto future = Task::run(pool.get(), readSensor).then(local.get(), [](double celsius) { return celsius > 21; }).getFuture();
+    auto tooWarm = Task::run(pool.get(), readSensor).then(loop.get(), [](double celsius) { return celsius > 21; }).submit();
 
     REQUIRE(waitFor([&] {
-        local->process(1);
-        return future.wait_for(0ms) == std::future_status::ready;
+        loop->runPending();
+        return tooWarm.isReady();
     }));
-    REQUIRE(future.get());
+    REQUIRE(tooWarm.get());
 }
 
 TEST_CASE("README: one handler for the errors of a chain", "[readme]")
@@ -109,9 +109,10 @@ TEST_CASE("README: one handler for the errors of a chain", "[readme]")
     std::atomic<bool> logged{false};
     auto download = []() -> std::string { throw std::runtime_error{"offline"}; };
 
-    Task::run(pool.get(), download)
-        .then(pool.get(), [](const std::string&) {})
-        .onException([&logged](const std::exception& ex) { logged = std::string{ex.what()} == "offline"; });
+    Task::run(pool.get(), download).then(pool.get(), [](const std::string&) {
+    }).onError([&logged](const std::exception& ex) {
+        logged = std::string{ex.what()} == "offline";
+    }).submit();
 
     REQUIRE(waitFor([&logged] { return logged.load(); }));
 }
@@ -133,22 +134,20 @@ namespace {
     };
 } // namespace
 
-TEST_CASE("README: a handler on another executor, with the token and the task's arguments", "[readme]")
+TEST_CASE("README: a handler on another executor", "[readme]")
 {
-    auto local = LocalThreadExecutor::create();
+    auto loop = ManualExecutor::create();
     auto pool = ThreadPoolExecutor::create(1);
-    CancellationTokenSource source;
-    auto token = source.token();
     Device device;
     std::atomic<bool> handled{false};
 
-    Task::run(local.get(), token, [](const CancellationToken&, Device& target) { target.connect(); }, std::ref(device))
-        .onException(pool.get(), [&handled](const std::exception& ex, const CancellationToken&, Device& target) {
-            target.markOffline(ex.what());
-            handled = true;
-        });
+    Task::run(loop.get(), &Device::connect, &device)
+        .onError(pool.get(), [&device, &handled](const std::exception& ex) {
+        device.markOffline(ex.what());
+        handled = true;
+    }).submit();
 
-    local->process(1);
+    loop->runPending();
     REQUIRE(waitFor([&handled] { return handled.load(); }));
     REQUIRE(device.offlineReason == "no answer");
 }
@@ -156,10 +155,10 @@ TEST_CASE("README: a handler on another executor, with the token and the task's 
 TEST_CASE("README: a custom unhandled-exception handler", "[readme]")
 {
     const UnhandledExceptions unhandled; // installs a recording handler like the README's
-    auto local = LocalThreadExecutor::create();
+    auto loop = ManualExecutor::create();
 
-    Task::run(local.get(), [] { throw std::runtime_error{"nobody handles this"}; });
-    local->process(1);
+    Task::post(loop.get(), [] { throw std::runtime_error{"nobody handles this"}; });
+    loop->runPending();
 
     REQUIRE(unhandled.messages() == std::vector<std::string>{"nobody handles this"});
 }
@@ -167,49 +166,50 @@ TEST_CASE("README: a custom unhandled-exception handler", "[readme]")
 TEST_CASE("README: a task that stops halfway when canceled", "[readme]")
 {
     auto pool = ThreadPoolExecutor::create(1);
-    CancellationTokenSource source;
+    std::stop_source source;
     std::atomic<int> processed{0};
     const std::vector<int> chunks(1000, 1);
 
-    auto future = Task::run(pool.get(), source.token(), [&chunks, &processed, &source](const CancellationToken& token) {
-                      for (const auto& chunk : chunks) {
-                          token.throwIfCancellationRequested();
-                          processed += chunk;
-                          if (processed == 10) {
-                              source.cancel();
-                          }
-                      }
-                  }).getFuture();
+    auto handle = Task::run(pool.get(), source.get_token(), [&chunks, &processed, &source](const std::stop_token& token) {
+        for (const auto& chunk : chunks) {
+            throwIfStopRequested(token);
+            processed += chunk;
+            if (processed == 10) {
+                source.request_stop();
+            }
+        }
+    }).submit();
 
-    REQUIRE_THROWS_AS(future.get(), OperationCanceledException);
+    REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
     REQUIRE(processed == 10);
 }
 
-TEST_CASE("README: reacting to a cancellation", "[readme]")
+TEST_CASE("README: canceling through the handle", "[readme]")
 {
-    CancellationTokenSource source;
-    bool aborted = false;
+    auto loop = ManualExecutor::create();
+    bool ran = false;
 
-    auto subscription = source.token().subscribe([&aborted] { aborted = true; });
-    source.cancel();
+    auto handle = Task::run(loop.get(), [&ran] { ran = true; }).submit();
+    handle.cancel();
+    loop->runPending();
 
-    REQUIRE(aborted);
-    REQUIRE_FALSE(CancellationToken::none().isCancellationRequested());
+    REQUIRE_FALSE(ran);
+    REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
 }
 
 TEST_CASE("README: delayed and periodic tasks", "[readme]")
 {
-    auto local = LocalThreadExecutor::create();
-    CancellationTokenSource stop;
+    auto loop = ManualExecutor::create();
+    std::stop_source stop;
     std::atomic<int> once{0};
     std::atomic<int> repeated{0};
 
-    Task::run(local.get(), stop.token(), 5ms, [&once] { ++once; });
-    Task::run(local.get(), stop.token(), 0ms, 5ms, [&repeated] { ++repeated; }).onException([](const std::exception&) {});
+    Task::run(loop.get(), stop.get_token(), 5ms, [&once] { ++once; }).submit();
+    Task::run(loop.get(), stop.get_token(), 0ms, 5ms, [&repeated] { ++repeated; }).onError([](const std::exception&) {}).submit();
 
     REQUIRE(waitFor([&] {
-        local->process(10);
+        loop->runPending();
         return once == 1 && repeated >= 2;
     }));
-    stop.cancel();
+    stop.request_stop();
 }

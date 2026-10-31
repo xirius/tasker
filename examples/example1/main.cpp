@@ -1,45 +1,30 @@
-#include <vanilo/core/Tracer.h>
 #include <vanilo/tasker/Tasker.h>
 
-#include <thread>
+#include <chrono>
+#include <iostream>
+
+// A periodic task on an event loop: it runs every 500 ms on this thread, and stops the loop after five runs.
 
 using namespace vanilo::tasker;
-using namespace vanilo::concurrent;
+using namespace std::chrono_literals;
 
 int main()
 {
-    auto counter = 0;
-    const auto executor = LocalThreadExecutor::create();
+    const auto loop = ManualExecutor::create();
+    std::stop_source stop;
     auto start = std::chrono::steady_clock::now();
-    auto source = CancellationTokenSource{};
+    int counter = 0;
 
-    Task::run(executor.get(), source.token(), std::chrono::milliseconds(500), std::chrono::milliseconds(500), [&start, &counter, &source] {
-        std::cout << "Hello World! " << std::endl;
-
-        const auto end = std::chrono::steady_clock::now();
-        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        std::cout << "Elapsed: " << elapsedMs << " ms\n";
-
-        // reset start
+    Task::run(loop.get(), stop.get_token(), 500ms, 500ms, [&start, &counter, &stop] {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+        std::cout << "Hello World! Elapsed: " << elapsed.count() << " ms\n";
         start = std::chrono::steady_clock::now();
 
         if (++counter == 5) {
-            source.cancel();
+            stop.request_stop(); // ends the series and the loop below
         }
-    });
+    }).submit();
 
-    while (true) {
-        executor->process(1);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-        if (source.isCancellationRequested()) {
-            auto finish = std::chrono::steady_clock::now();
-
-            if (const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start).count(); elapsedMs > 2000) {
-                break;
-            }
-        }
-    }
-
+    loop->runUntil(stop.get_token());
     return 0;
 }

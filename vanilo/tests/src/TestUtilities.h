@@ -125,7 +125,7 @@ namespace vanilo::tests {
     };
 
     /**
-     * A plain Task that records whether it was canceled and how often it ran.
+     * A Task object that records how often it ran and whether it was canceled (instead of running).
      */
     class RecordingTask final: public tasker::Task
     {

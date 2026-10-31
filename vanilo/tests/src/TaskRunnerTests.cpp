@@ -10,17 +10,17 @@ void test_11(int& result)
     result += 1;
 }
 
-void test_21(const CancellationToken&, int& result)
+void test_21(const std::stop_token&, int& result)
 {
     result += 1;
 }
 
-void test_22(const CancellationToken&, int& result)
+void test_22(std::stop_token, int& result)
 {
     result += 1;
 }
 
-void test_23(const CancellationToken&, int& result) noexcept
+void test_23(const std::stop_token&, int& result) noexcept
 {
     result += 1;
 }
@@ -32,42 +32,42 @@ struct Foo
         result += 1;
     }
 
-    static void bar_21(const CancellationToken&, int& result)
+    static void bar_21(const std::stop_token&, int& result)
     {
         result += 1;
     }
 
-    static void bar_22(const CancellationToken&, int& result)
+    static void bar_22(std::stop_token, int& result)
     {
         result += 1;
     }
 
-    static void bar_23(const CancellationToken&, int& result) noexcept
+    static void bar_23(const std::stop_token&, int& result) noexcept
     {
         result += 1;
     }
 
-    void mbar_12(const CancellationToken&, int& result)
+    void mbar_12(const std::stop_token&, int& result)
     {
         result += 1;
     }
 
-    void mbar_21(const CancellationToken&, int& result)
+    void mbar_21(const std::stop_token&, int& result)
     {
         result += 1;
     }
 
-    void mbar_22(const CancellationToken&, int& result)
+    void mbar_22(std::stop_token, int& result)
     {
         result += 1;
     }
 
-    void mbar_23(const CancellationToken&, int& result) const
+    void mbar_23(const std::stop_token&, int& result) const
     {
         result += 1;
     }
 
-    void mbar_24(const CancellationToken&, int& result) const noexcept
+    void mbar_24(const std::stop_token&, int& result) const noexcept
     {
         result += 1;
     }
@@ -78,48 +78,48 @@ struct Foo
 
 SCENARIO("Task::run #1 void<>", "[task runner]")
 {
-    GIVEN("A local executor")
+    GIVEN("A manual executor")
     {
-        auto executor = LocalThreadExecutor::create();
+        auto executor = ManualExecutor::create();
         int result = 0;
 
         WHEN("Task is a Lambda function")
         {
-            Task::run(executor.get(), [&result] {
+            Task::post(executor.get(), [&result] {
                 result = 1; // Flag to confirm execution
             });
 
-            executor->process(1);
+            executor->runPending(1);
 
             THEN("The count should be 0 and the result 1")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 1);
             }
         }
 
         WHEN("Task is a free function #1")
         {
-            Task::run(executor.get(), &test_11, std::ref(result));
+            Task::post(executor.get(), &test_11, std::ref(result));
 
-            executor->process(1);
+            executor->runPending(1);
 
             THEN("The count should be 0 and the result 1")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 1);
             }
         }
 
         WHEN("Task is a free function #2")
         {
-            Task::run(executor.get(), &Foo::bar_11, std::ref(result));
+            Task::run(executor.get(), &Foo::bar_11, std::ref(result)).submit();
 
-            executor->process(1);
+            executor->runPending(1);
 
             THEN("The count should be 0 and the result 1")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 1);
             }
         }
@@ -127,75 +127,75 @@ SCENARIO("Task::run #1 void<>", "[task runner]")
         WHEN("Task is a member function")
         {
             Foo foo;
-            Task::run(executor.get(), &Foo::mbar_12, foo, std::ref(result));
+            Task::post(executor.get(), &Foo::mbar_12, foo, std::ref(result));
 
-            executor->process(1);
+            executor->runPending(1);
 
             THEN("The count should be 0 and the result 1")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 1);
             }
         }
     }
 }
 
-SCENARIO("Task::run #2 void<[CancellationToken]>", "[task runner]")
+SCENARIO("Task::run #2 void<[std::stop_token]>", "[task runner]")
 {
-    GIVEN("A local executor")
+    GIVEN("A manual executor")
     {
-        auto executor = LocalThreadExecutor::create();
+        auto executor = ManualExecutor::create();
         int result = 0;
 
         WHEN("Task is a Lambda function #1")
         {
-            Task::run(executor.get(), [&result](const CancellationToken&) {
+            Task::post(executor.get(), [&result](const std::stop_token&) {
                 result += 1; // Flag to confirm execution
             });
 
-            Task::run(executor.get(), [&result](const CancellationToken&) {
+            Task::run(executor.get(), [&result](std::stop_token) {
+                result += 1; // Flag to confirm execution
+            }).submit();
+
+            Task::post(executor.get(), [&result](const std::stop_token&) noexcept {
                 result += 1; // Flag to confirm execution
             });
 
-            Task::run(executor.get(), [&result](const CancellationToken&) noexcept {
-                result += 1; // Flag to confirm execution
-            });
-
-            executor->process(3);
+            executor->runPending(3);
 
             THEN("The count should be 0 and the result 3")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 3);
             }
         }
 
         WHEN("Task is a free function #1")
         {
-            Task::run(executor.get(), &test_21, std::ref(result));
-            Task::run(executor.get(), &test_22, std::ref(result));
-            Task::run(executor.get(), &test_23, std::ref(result));
+            Task::post(executor.get(), &test_21, std::ref(result));
+            Task::post(executor.get(), &test_22, std::ref(result));
+            Task::run(executor.get(), &test_23, std::ref(result)).submit();
 
-            executor->process(3);
+            executor->runPending(3);
 
             THEN("The count should be 0 and the result 3")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 3);
             }
         }
 
         WHEN("Task is a free function #3")
         {
-            Task::run(executor.get(), &Foo::bar_21, std::ref(result));
-            Task::run(executor.get(), &Foo::bar_22, std::ref(result));
-            Task::run(executor.get(), &Foo::bar_23, std::ref(result));
+            Task::post(executor.get(), &Foo::bar_21, std::ref(result));
+            Task::post(executor.get(), &Foo::bar_22, std::ref(result));
+            Task::post(executor.get(), &Foo::bar_23, std::ref(result));
 
-            executor->process(3);
+            executor->runPending(3);
 
             THEN("The count should be 0 and the result 3")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 3);
             }
         }
@@ -203,16 +203,16 @@ SCENARIO("Task::run #2 void<[CancellationToken]>", "[task runner]")
         WHEN("Task is a member function")
         {
             Foo foo;
-            Task::run(executor.get(), &Foo::mbar_21, foo, std::ref(result));
-            Task::run(executor.get(), &Foo::mbar_22, foo, std::ref(result));
-            Task::run(executor.get(), &Foo::mbar_23, foo, std::ref(result));
-            Task::run(executor.get(), &Foo::mbar_24, foo, std::ref(result));
+            Task::post(executor.get(), &Foo::mbar_21, foo, std::ref(result));
+            Task::post(executor.get(), &Foo::mbar_22, &foo, std::ref(result));
+            Task::run(executor.get(), &Foo::mbar_23, std::ref(foo), std::ref(result)).submit();
+            Task::run(executor.get(), &Foo::mbar_24, foo, std::ref(result)).submit();
 
-            executor->process(4);
+            executor->runPending(4);
 
             THEN("The count should be 0 and the result 4")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
                 REQUIRE(result == 4);
             }
         }
@@ -221,37 +221,37 @@ SCENARIO("Task::run #2 void<[CancellationToken]>", "[task runner]")
 
 SCENARIO("Task::run #3 Result<void> -> Result<Arg>", "[task runner]")
 {
-    GIVEN("A local executor")
+    GIVEN("A manual executor")
     {
-        const auto executor = LocalThreadExecutor::create();
+        const auto executor = ManualExecutor::create();
 
-        WHEN("Future is taken from 1 level task #1")
+        WHEN("The result is taken from a 1 level chain")
         {
-            auto future = Task::run(executor.get(), []() { return 123; }).getFuture();
+            auto handle = Task::run(executor.get(), []() { return 123; }).submit();
 
-            executor->process(1);
+            executor->runPending(1);
 
             THEN("The count should be 0 and the result 123")
             {
-                REQUIRE(executor->count() == 0);
-                REQUIRE(future.get() == 123);
+                REQUIRE(executor->pendingCount() == 0);
+                REQUIRE(handle.get() == 123);
             }
         }
 
-        WHEN("Future is taken from 2 level task #1")
+        WHEN("The result is taken from a 2 level chain")
         {
-            auto future = Task::run(executor.get(), [] {
+            auto handle = Task::run(executor.get(), [] {
                 return 1.23; // pass to the next task
             }).then(executor.get(), [](const double arg) {
                 return arg * 3.21;
-            }).getFuture();
+            }).submit();
 
-            executor->process(2);
+            executor->runPending(2);
 
             THEN("The count should be 0 and the result 123")
             {
-                REQUIRE(executor->count() == 0);
-                REQUIRE(future.get() == 1.23 * 3.21);
+                REQUIRE(executor->pendingCount() == 0);
+                REQUIRE(handle.get() == 1.23 * 3.21);
             }
         }
     }
@@ -259,14 +259,16 @@ SCENARIO("Task::run #3 Result<void> -> Result<Arg>", "[task runner]")
 
 TEST_CASE("Run task: Chaining tasks", "[task]")
 {
-    const auto executor = LocalThreadExecutor::create();
+    const auto executor = ManualExecutor::create();
     int result{0};
 
     Task::run(executor.get(), []() { return 123; }).then(executor.get(), [&result](const int x) {
         result = x;
-    }).then(executor.get(), [&result]() { result = result * 2; });
+    }).then(executor.get(), [&result]() {
+        result = result * 2;
+    }).submit();
 
-    executor->process(3);
+    executor->runPending(3);
 
     REQUIRE(result == 123 * 2);
 }

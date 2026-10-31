@@ -26,7 +26,7 @@ class CustomTask: public Task
     int& _value;
 };
 
-SCENARIO("Test the flow of the LocalThreadExecutor", "[local executor]")
+SCENARIO("Test the flow of the ManualExecutor", "[manual executor]")
 {
     GIVEN("An initial executor")
     {
@@ -37,17 +37,17 @@ SCENARIO("Test the flow of the LocalThreadExecutor", "[local executor]")
         auto task2 = std::make_unique<CustomTask>(value2);
         auto task3 = std::make_unique<CustomTask>(value3);
 
-        auto executor = LocalThreadExecutor::create();
+        auto executor = ManualExecutor::create();
 
         WHEN("No task are submitted")
         {
             THEN("The count should return 0")
             {
-                REQUIRE(executor->count() == 0);
+                REQUIRE(executor->pendingCount() == 0);
             }
         }
 
-        WHEN("2 tasks are submitted")
+        WHEN("3 tasks are submitted")
         {
             executor->submit(std::move(task1));
             executor->submit(std::move(task2));
@@ -55,17 +55,17 @@ SCENARIO("Test the flow of the LocalThreadExecutor", "[local executor]")
 
             THEN("The count should return 3")
             {
-                REQUIRE(executor->count() == 3);
+                REQUIRE(executor->pendingCount() == 3);
             }
         }
 
-        WHEN("Executor is asked to process 2 tasks")
+        WHEN("Executor is asked to run 2 tasks")
         {
             executor->submit(std::move(task1));
             executor->submit(std::move(task2));
             executor->submit(std::move(task3));
 
-            auto enqueued = executor->process(2);
+            auto enqueued = executor->runPending(2);
 
             THEN("The number of task in the queue should be 1")
             {
@@ -115,7 +115,7 @@ SCENARIO("Test resizing of ThreadPoolExecutor", "[pool executor]")
     {
         auto executor = ThreadPoolExecutor::create(10);
 
-        WHEN("Resized to 25")
+        WHEN("Resized to 5")
         {
             auto future = executor->resize(5);
 
@@ -149,11 +149,10 @@ SCENARIO("Test cancellation of tasks when ThreadPoolExecutor is released", "[poo
         {
             bool nonExecuted = true;
             bool isCancelled = false;
-            Task::run(executor.get(), [&nonExecuted] {
-                nonExecuted = false;
-            }).onException(executor.get(), [&isCancelled](std::exception& ex, const CancellationToken&) {
+            Task::run(executor.get(), [&nonExecuted] { nonExecuted = false; })
+                .onError(executor.get(), [&isCancelled](std::exception& ex, const std::stop_token&) {
                 isCancelled = dynamic_cast<OperationCanceledException*>(&ex) != nullptr;
-            });
+            }).submit();
 
             executor.reset();
 
