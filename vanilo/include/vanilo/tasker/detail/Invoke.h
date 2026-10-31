@@ -46,16 +46,6 @@ namespace vanilo::tasker::detail {
         return value.get();
     }
 
-    template <typename T>
-    struct IsTuple: std::false_type
-    {
-    };
-
-    template <typename... T>
-    struct IsTuple<std::tuple<T...>>: std::true_type
-    {
-    };
-
     /// Call shapes
     /// ============================================================================================
 

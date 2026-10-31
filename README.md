@@ -317,6 +317,7 @@ before destroying it.
 - **Where code runs.** A task runs on its executor. A handler runs on its executor (see [Errors](#errors)).
   A `ManualExecutor` only runs anything inside `runPending()` and `runUntil()`.
 - **Waiting inside a pool task** for another pool task works, as long as the pool has another thread to run it.
+  Don't wait for a handle on the thread that runs its `ManualExecutor`: the task can't run while that thread waits.
 - **Token parameters.** A function whose first parameter takes a `std::stop_token` receives the chain's token, so a
   variadic generic lambda (`[](auto&&...)`) receives it too.
 - **Debug output.** `<vanilo/core/Tracer.h>` provides `VANILO_TRACE`, `VANILO_ASSERT` and `VANILO_VERIFY`,

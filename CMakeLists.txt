@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(Vanilo VERSION 1.0 DESCRIPTION "Vanilo Tasker C++" LANGUAGES CXX)
+project(Vanilo VERSION 1.0 DESCRIPTION "Vanilo: tasks, chains and executors for C++20" LANGUAGES CXX)
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are not allowed. Use a preset (cmake --preset debug) or -B <build-dir>.")

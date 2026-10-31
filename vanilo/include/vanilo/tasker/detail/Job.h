@@ -206,25 +206,6 @@ namespace vanilo::tasker::detail {
         const Operations* _operations{nullptr};
     };
 
-    /**
-     * A job running a function; canceling it only drops the function.
-     */
-    template <typename Function>
-    struct FunctionJob
-    {
-        Function function;
-
-        void run()
-        {
-            function();
-        }
-
-        void cancel() noexcept
-        {
-            // Dropped
-        }
-    };
-
 } // namespace vanilo::tasker::detail
 
 #endif // VANILO_TASKER_DETAIL_JOB_H
