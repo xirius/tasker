@@ -9,5 +9,6 @@
 #include <vanilo/tasker/TaskExecutor.h>
 #include <vanilo/tasker/TaskHandle.h>
 #include <vanilo/tasker/UnhandledException.h>
+#include <vanilo/tasker/WhenAll.h>
 
 #endif // INC_CF1B33A15FDE47BDA967EACB24A90BED
