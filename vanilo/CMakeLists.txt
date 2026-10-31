@@ -31,6 +31,7 @@ target_include_directories(Vanilo
         "${CMAKE_CURRENT_SOURCE_DIR}/private"
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
+target_compile_options(Vanilo PRIVATE ${TASKER_WARNING_FLAGS})
 target_link_libraries(Vanilo PUBLIC Threads::Threads atomic)
 
 include(GenerateExportHeader)
@@ -66,12 +67,35 @@ if(TASKER_BUILD_TESTS)
     target_include_directories(Vanilo.tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/private"
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_options(Vanilo.tests PRIVATE ${TASKER_WARNING_FLAGS})
     set_target_properties(Vanilo.tests PROPERTIES
         CXX_EXTENSIONS OFF
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/tests"
         COMPILE_WARNING_AS_ERROR ${TASKER_WARNINGS_AS_ERRORS})
 
     add_test(NAME Vanilo.tests COMMAND Vanilo.tests)
+
+    if(TASKER_COVERAGE)
+        find_program(LLVM_PROFDATA NAMES llvm-profdata REQUIRED)
+        find_program(LLVM_COV NAMES llvm-cov REQUIRED)
+        set(COVERAGE_DIR "${PROJECT_BINARY_DIR}/coverage")
+        set(COVERAGE_ARGS
+            "$<TARGET_FILE:Vanilo.tests>"
+            "$<$<STREQUAL:$<TARGET_PROPERTY:Vanilo,TYPE>,SHARED_LIBRARY>:-object=$<TARGET_FILE:Vanilo>>"
+            "-instr-profile=${COVERAGE_DIR}/tests.profdata"
+            "-ignore-filename-regex=(/tests/|/_deps/|^/usr/)")
+
+        add_custom_target(tasker-coverage
+            COMMAND "${CMAKE_COMMAND}" -E rm -rf "${COVERAGE_DIR}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${COVERAGE_DIR}"
+            COMMAND "${CMAKE_COMMAND}" -E env "LLVM_PROFILE_FILE=${COVERAGE_DIR}/tests.profraw" "$<TARGET_FILE:Vanilo.tests>"
+            COMMAND "${LLVM_PROFDATA}" merge -sparse "${COVERAGE_DIR}/tests.profraw" -o "${COVERAGE_DIR}/tests.profdata"
+            COMMAND "${LLVM_COV}" report ${COVERAGE_ARGS}
+            COMMAND "${LLVM_COV}" show ${COVERAGE_ARGS} -format=html "-output-dir=${COVERAGE_DIR}/html"
+            DEPENDS Vanilo.tests
+            COMMENT "Running the tests with coverage; HTML report in ${COVERAGE_DIR}/html"
+            VERBATIM)
+    endif()
 endif()
 
 # Install rules and CMake package, so consumers can also use find_package(Vanilo)

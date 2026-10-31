@@ -28,7 +28,7 @@ TEST_CASE("ConcurrentQueue basic operations", "[concurrent][ConcurrentQueue]")
         REQUIRE(queue.size() == 2);
         REQUIRE_FALSE(queue.empty());
 
-        int val;
+        int val = 0;
         REQUIRE(queue.tryDequeue(val));
         REQUIRE(val == 1);
         REQUIRE(queue.tryDequeue(val));
@@ -44,7 +44,7 @@ TEST_CASE("ConcurrentQueue basic operations", "[concurrent][ConcurrentQueue]")
             queue.enqueue(42);
         });
 
-        int val;
+        int val = 0;
         REQUIRE(queue.waitDequeue(val));
         REQUIRE(val == 42);
         producer.join();
@@ -69,7 +69,7 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
     {
         queue.enqueue(10);
         cts.cancel();
-        int val;
+        int val = 0;
         REQUIRE(queue.waitDequeue(cts.token(), val));
         REQUIRE(val == 10);
         REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
@@ -82,7 +82,7 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
             cts.cancel();
         });
 
-        int val;
+        int val = 0;
         auto start = std::chrono::steady_clock::now();
         REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
         auto end = std::chrono::steady_clock::now();
@@ -94,7 +94,7 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
     {
         queue.enqueue(1);
         queue.close();
-        int val;
+        int val = 0;
         REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
     }
 
@@ -105,7 +105,7 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
             queue.close();
         });
 
-        int val;
+        int val = 0;
         auto start = std::chrono::steady_clock::now();
         REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
         auto end = std::chrono::steady_clock::now();
@@ -117,7 +117,7 @@ TEST_CASE("ConcurrentQueue CancellationToken", "[concurrent][ConcurrentQueue]")
     {
         queue.close();
         cts.cancel();
-        int val;
+        int val = 0;
         REQUIRE_FALSE(queue.waitDequeue(cts.token(), val));
     }
 }
@@ -148,7 +148,7 @@ TEST_CASE("ConcurrentQueue invalidation", "[concurrent][ConcurrentQueue]")
     {
         queue.enqueue(1);
         queue.close();
-        int val;
+        int val = 0;
         REQUIRE_FALSE(queue.tryDequeue(val));
     }
 
@@ -159,7 +159,7 @@ TEST_CASE("ConcurrentQueue invalidation", "[concurrent][ConcurrentQueue]")
             queue.close();
         });
 
-        int val;
+        int val = 0;
         REQUIRE_FALSE(queue.waitDequeue(val));
         invalidator.join();
     }
@@ -187,7 +187,7 @@ TEST_CASE("ConcurrentQueue concurrency", "[concurrent][ConcurrentQueue]")
     std::vector<std::thread> consumers;
     for (int i = 0; i < numConsumers; ++i) {
         consumers.emplace_back([&queue, &totalConsumed, &sumConsumed, &tokenSource, token = tokenSource.token()] {
-            int val;
+            int val = 0;
 
             while (queue.waitDequeue(token, val)) {
                 sumConsumed += val;
@@ -227,7 +227,7 @@ TEST_CASE("ConcurrentQueue destruction while waiting", "[concurrent][ConcurrentQ
     // The thread uses the raw pointer: reading the unique_ptr while reset() writes it would itself be a data race.
     std::thread consumer([rawQueue = queue.get(), &thread_started, &wait_finished]() {
         thread_started = true;
-        int val;
+        int val = 0;
         const bool result = rawQueue->waitDequeue(val);
         wait_finished = true;
         (void)result;
@@ -254,7 +254,7 @@ TEST_CASE("ConcurrentQueue destruction with many waiters", "[concurrent][Concurr
         // Raw pointer for the same reason as above: the unique_ptr itself is reset concurrently.
         waiters.emplace_back([rawQueue = queue.get(), &completedWaiters] {
             // Should return false when the queue is destroyed/closed
-            if (int val; !rawQueue->waitDequeue(val)) {
+            if (int val = 0; !rawQueue->waitDequeue(val)) {
                 ++completedWaiters;
             }
         });
@@ -304,7 +304,7 @@ TEST_CASE("ConcurrentQueue enqueueFront", "[concurrent][ConcurrentQueue][enqueue
 
         REQUIRE(queue.enqueueFront(0));
 
-        int val;
+        int val = 0;
         REQUIRE(queue.tryDequeue(val));
         REQUIRE(val == 0);
         REQUIRE(queue.tryDequeue(val));
@@ -316,7 +316,7 @@ TEST_CASE("ConcurrentQueue enqueueFront", "[concurrent][ConcurrentQueue][enqueue
     SECTION("EnqueueFront works on empty queue")
     {
         REQUIRE(queue.enqueueFront(10));
-        int val;
+        int val = 0;
         REQUIRE(queue.tryDequeue(val));
         REQUIRE(val == 10);
     }

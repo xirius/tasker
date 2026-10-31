@@ -39,6 +39,21 @@ elseif(TASKER_SANITIZER)
     message(FATAL_ERROR "TASKER_SANITIZER must be address, thread or empty, not '${TASKER_SANITIZER}'.")
 endif()
 
+# Clang source-based coverage; the tasker-coverage target runs the tests and writes the report.
+option(TASKER_COVERAGE "Instrument tasker for coverage (Clang only)" OFF)
+if(TASKER_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "TASKER_COVERAGE needs Clang (source-based coverage).")
+    endif()
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate)
+endif()
+
+# Warning level for tasker's own targets (not for Catch2 or consumers)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(TASKER_WARNING_FLAGS -Wall -Wextra -Wpedantic)
+endif()
+
 if(TASKER_BUILD_TESTS)
     enable_testing()
 endif()
