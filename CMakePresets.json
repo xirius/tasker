@@ -59,6 +59,16 @@
         "BUILD_SHARED_LIBS": "OFF",
         "TASKER_COVERAGE": "ON"
       }
+    },
+    {
+      "name": "benchmark",
+      "displayName": "Release with the benchmarks",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "TASKER_BUILD_BENCHMARKS": "ON",
+        "TASKER_BUILD_TESTS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -81,6 +91,10 @@
     {
       "name": "coverage",
       "configurePreset": "coverage"
+    },
+    {
+      "name": "benchmark",
+      "configurePreset": "benchmark"
     }
   ],
   "testPresets": [

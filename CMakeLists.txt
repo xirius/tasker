@@ -12,6 +12,7 @@ option(TASKER_BUILD_TESTS "Build the unit tests" ${PROJECT_IS_TOP_LEVEL})
 option(TASKER_BUILD_EXAMPLES "Build the examples" ${PROJECT_IS_TOP_LEVEL})
 option(TASKER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ${PROJECT_IS_TOP_LEVEL})
 option(TASKER_INSTALL "Generate install rules and a Vanilo CMake package" ${PROJECT_IS_TOP_LEVEL})
+option(TASKER_BUILD_BENCHMARKS "Build the benchmarks (Google Benchmark)" OFF)
 set(TASKER_SANITIZER "" CACHE STRING "Build tasker with a sanitizer: address (with UBSan), thread, or empty")
 set_property(CACHE TASKER_SANITIZER PROPERTY STRINGS "" address thread)
 
@@ -62,4 +63,8 @@ add_subdirectory(vanilo)
 
 if(TASKER_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(TASKER_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
