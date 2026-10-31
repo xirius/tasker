@@ -292,19 +292,20 @@ namespace {
 
 const std::shared_ptr<TimerQueue>& TimerQueue::instance()
 {
-    // Created on first use, so the thread doesn't start when the library is loaded; shut down at exit.
-    struct Holder
+    // Created on first use, so its thread doesn't start when the library is loaded. It is shut down when the
+    // program exits but never destroyed, so code running during static destruction can still use it: it then
+    // refuses new entries, which cancels their chains.
+    static const auto* const queue = new std::shared_ptr<TimerQueue>(std::make_shared<TimerQueue>());
+
+    static const struct Shutdown
     {
-        std::shared_ptr<TimerQueue> queue = std::make_shared<TimerQueue>();
-
-        ~Holder()
+        ~Shutdown()
         {
-            queue->shutdown();
+            (*queue)->shutdown();
         }
-    };
+    } shutdown;
 
-    static Holder holder;
-    return holder.queue;
+    return *queue;
 }
 
 TimerQueue::TimerQueue()
