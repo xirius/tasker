@@ -138,6 +138,24 @@ TEST_CASE("A fixed-delay series ends when it is canceled during a run", "[period
     REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
 }
 
+TEST_CASE("A fixed-delay series ends at once when it is canceled while a run waits in the queue", "[periodic][fixed delay][cancel]")
+{
+    const auto executor = ManualExecutor::create();
+    std::atomic<int> cancellations{0};
+
+    auto handle = Task::run(executor.get(), 0ms, FixedDelay{1ms}, [] {})
+                      .onError([&cancellations](const OperationCanceledException&) {
+        ++cancellations;
+    }).submit();
+
+    REQUIRE(waitFor([&executor] { return executor->pendingCount() == 1; })); // the first run waits to be run
+    handle.cancel();
+
+    REQUIRE(handle.waitFor(5s)); // without running the executor
+    executor->runPending();
+    REQUIRE(cancellations == 1); // the queued run reports the cancellation
+}
+
 TEST_CASE("A fixed-delay series ends when its executor is destroyed", "[periodic][fixed delay][shutdown]")
 {
     auto executor = ManualExecutor::create();

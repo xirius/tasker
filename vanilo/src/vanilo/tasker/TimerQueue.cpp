@@ -79,6 +79,17 @@ namespace {
     /// ============================================================================================
 
     class SeriesEntry;
+    class SeriesState;
+
+    /**
+     * Ends a series when it is stopped, also while its entry waits for a fixed-delay run to finish.
+     */
+    struct StopSeries
+    {
+        SeriesState* series;
+
+        void operator()() const noexcept;
+    };
 
     /**
      * The state of a periodic chain, shared by its handle, its timer entry and its runs. Each run is a copy of
@@ -90,7 +101,7 @@ namespace {
       public:
         SeriesState(ChainParts parts, const std::shared_ptr<TimerQueue>& queue)
             : ChainState<void>{std::move(parts.token)}, _template{std::move(parts.head)}, _period{parts.period}, _mode{parts.mode},
-              _queue{queue}, _wake{token(), WakeTimerQueue{queue}}
+              _queue{queue}, _wake{token(), StopSeries{this}}
         {
         }
 
@@ -113,6 +124,20 @@ namespace {
         void tick(std::unique_ptr<TimerEntry> entry) noexcept;
 
         /**
+         * A stop was requested. An entry waiting in the timer queue is dropped by the queue; one parked while a
+         * fixed-delay run is in progress ends the series now (the run delivers its own cancellation).
+         */
+        void onStop() noexcept
+        {
+            if (const auto self = weak_from_this().lock()) { // not while the series is being created or destroyed
+                endIfParked();
+            }
+            if (const auto queue = _queue.lock()) {
+                queue->purge();
+            }
+        }
+
+        /**
          * The series is over (canceled, or its executor or the timer queue shut down).
          */
         void end() noexcept
@@ -133,6 +158,19 @@ namespace {
         }
 
       private:
+        void endIfParked() noexcept
+        {
+            std::unique_ptr<TimerEntry> parked;
+            {
+                std::lock_guard lock{_mutex};
+                parked = std::move(_parked);
+            }
+            if (parked) {
+                parked.reset();
+                end();
+            }
+        }
+
         void runFinished() noexcept;
         void scheduleNext(std::unique_ptr<TimerEntry> entry, SteadyClock::time_point due) noexcept;
 
@@ -143,7 +181,7 @@ namespace {
         PeriodicMode _mode;
         std::weak_ptr<TimerQueue> _queue;
         std::atomic<bool> _ended{false};
-        std::stop_callback<WakeTimerQueue> _wake; // last: it may run as soon as it is constructed
+        std::stop_callback<StopSeries> _wake; // last: it may run as soon as it is constructed
     };
 
     /**
@@ -179,6 +217,11 @@ namespace {
         std::shared_ptr<SeriesState> _series;
     };
 
+    void StopSeries::operator()() const noexcept
+    {
+        series->onStop();
+    }
+
     void SeriesState::tick(std::unique_ptr<TimerEntry> entry) noexcept
     {
         if (stopRequested()) {
@@ -213,6 +256,9 @@ namespace {
 
             if (!Node::tryStart(std::move(run), shared_from_this())) {
                 end(); // the executor is gone
+            }
+            else if (stopRequested()) {
+                endIfParked(); // stopped while parking: onStop() may have found nothing to end
             }
             return;
         }
