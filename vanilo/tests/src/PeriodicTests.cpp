@@ -241,6 +241,18 @@ TEST_CASE("A periodic run whose copy fails is skipped and reported; the series g
         handle.wait();
     }
 
+    SECTION("fixed rate that skips")
+    {
+        // A copy that fails starts no run, so it must not count as a run that hasn't finished.
+        auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, std::move(task)).submit();
+        REQUIRE(waitFor([&] {
+            executor->runPending();
+            return *runs >= 2 && unhandled.messages().size() >= 2;
+        }));
+        handle.cancel();
+        handle.wait();
+    }
+
     REQUIRE(unhandled.messages().front() == "copy failed");
 }
 
@@ -256,4 +268,242 @@ TEST_CASE("A fixed-rate series with a very short period skips the periods it can
     }));
     handle.cancel();
     REQUIRE(handle.waitFor(5s));
+}
+
+/// Fixed rate that skips
+/// ================================================================================================
+
+TEST_CASE("Overrun::Queue is what a fixed rate does by default", "[periodic][overrun]")
+{
+    const auto executor = ManualExecutor::create();
+    auto task = [] {};
+    TaskHandle<void> handle;
+
+    SECTION("a plain duration")
+    {
+        handle = Task::run(executor.get(), 0ms, 1ms, task).submit();
+    }
+
+    SECTION("FixedRate without an overrun")
+    {
+        handle = Task::run(executor.get(), 0ms, FixedRate{1ms}, task).submit();
+    }
+
+    SECTION("Overrun::Queue")
+    {
+        handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Queue}, task).submit();
+    }
+
+    REQUIRE(waitFor([&executor] { return executor->pendingCount() >= 3; })); // the runs pile up
+    handle.cancel();
+    REQUIRE(handle.waitFor(5s));
+}
+
+TEST_CASE("A fixed rate that skips needs a positive interval", "[periodic][overrun]")
+{
+    const auto executor = ManualExecutor::create();
+
+    REQUIRE_THROWS_AS(Task::run(executor.get(), 0ms, FixedRate{0ms, Overrun::Skip}, [] {}), std::invalid_argument);
+}
+
+TEST_CASE("A fixed rate that skips holds one run at most on an executor that doesn't keep up", "[periodic][overrun]")
+{
+    const auto executor = ManualExecutor::create();
+    std::atomic<int> runs{0};
+
+    auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [&runs] { ++runs; }).submit();
+
+    REQUIRE(waitFor([&executor] { return executor->pendingCount() == 1; }));
+    std::this_thread::sleep_for(30ms); // many periods
+    REQUIRE(executor->pendingCount() == 1);
+    REQUIRE(runs == 0);
+
+    executor->runPending(1);
+    REQUIRE(runs == 1); // not a burst
+
+    handle.cancel();
+    REQUIRE(handle.waitFor(5s));
+}
+
+TEST_CASE("A fixed rate that skips goes on once the executor catches up", "[periodic][overrun]")
+{
+    const auto executor = ManualExecutor::create();
+    std::atomic<int> runs{0};
+
+    auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [&runs] { ++runs; }).submit();
+
+    REQUIRE(waitFor([&executor] { return executor->pendingCount() == 1; }));
+    std::this_thread::sleep_for(20ms);
+
+    REQUIRE(waitFor([&] {
+        executor->runPending();
+        return runs >= 3;
+    }));
+    handle.cancel();
+    REQUIRE(handle.waitFor(5s));
+}
+
+TEST_CASE("Runs of a fixed rate that skips never overlap", "[periodic][overrun]")
+{
+    const auto pool = ThreadPoolExecutor::create(4);
+    Overlap overlap;
+
+    // Each run takes longer than the interval.
+    auto handle = Task::run(pool.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [&overlap] { overlap.run(10ms); }).submit();
+
+    REQUIRE(waitFor([&overlap] { return overlap.runs >= 5; }));
+    handle.cancel();
+    handle.wait();
+    REQUIRE(overlap.most == 1);
+}
+
+TEST_CASE("A run of a fixed rate that skips lasts until the end of its whole chain", "[periodic][overrun]")
+{
+    const auto pool = ThreadPoolExecutor::create(2);
+    const auto stalled = ManualExecutor::create();
+    std::atomic<int> firstSteps{0};
+
+    auto handle =
+        Task::run(pool.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [&firstSteps] { ++firstSteps; }).then(stalled.get(), [] {}).submit();
+
+    REQUIRE(waitFor([&stalled] { return stalled->pendingCount() == 1; }));
+    std::this_thread::sleep_for(30ms); // many periods
+    REQUIRE(stalled->pendingCount() == 1);
+    REQUIRE(firstSteps == 1);
+
+    stalled->runPending(1);
+    REQUIRE(waitFor([&firstSteps] { return firstSteps >= 2; })); // that run has finished: the next one comes
+
+    handle.cancel();
+    REQUIRE(handle.waitFor(5s));
+}
+
+TEST_CASE("A failing run doesn't stop a fixed rate that skips", "[periodic][overrun][exception]")
+{
+    const auto executor = ManualExecutor::create();
+    std::atomic<int> failures{0};
+    std::atomic<int> cancellations{0};
+
+    SECTION("a run that throws")
+    {
+        auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [] { throw std::runtime_error{"run failed"}; })
+                          .onError([&failures](const std::exception&) {
+            ++failures;
+        }).submit();
+
+        REQUIRE(waitFor([&] {
+            executor->runPending();
+            return failures >= 3;
+        }));
+        handle.cancel();
+        REQUIRE(handle.waitFor(5s));
+    }
+
+    SECTION("a run that cancels itself")
+    {
+        auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [] { throw OperationCanceledException{}; })
+                          .onError([&cancellations](const OperationCanceledException&) {
+            ++cancellations;
+        }).submit();
+
+        REQUIRE(waitFor([&] {
+            executor->runPending();
+            return cancellations >= 3;
+        }));
+        handle.cancel();
+        REQUIRE(handle.waitFor(5s));
+    }
+
+    SECTION("a run that recovers")
+    {
+        auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, []() -> int { throw std::runtime_error{"run failed"}; })
+                          .recover([&failures](const std::exception&) {
+            ++failures;
+            return 0;
+        }).submit();
+
+        REQUIRE(waitFor([&] {
+            executor->runPending();
+            return failures >= 3;
+        }));
+        handle.cancel();
+        REQUIRE(handle.waitFor(5s));
+    }
+}
+
+TEST_CASE("A fixed rate that skips ends when it is canceled", "[periodic][overrun][cancel]")
+{
+    SECTION("during a run")
+    {
+        const auto pool = ThreadPoolExecutor::create(2);
+        std::atomic<bool> inRun{false};
+
+        auto handle = Task::run(pool.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [&inRun] {
+            inRun = true;
+            std::this_thread::sleep_for(30ms);
+        }).submit();
+
+        REQUIRE(waitFor([&inRun] { return inRun.load(); }));
+        handle.cancel();
+
+        REQUIRE(handle.waitFor(5s));
+        REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
+    }
+
+    SECTION("while a run waits in the queue")
+    {
+        const auto executor = ManualExecutor::create();
+        std::atomic<int> cancellations{0};
+
+        auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [] {})
+                          .onError([&cancellations](const OperationCanceledException&) {
+            ++cancellations;
+        }).submit();
+
+        REQUIRE(waitFor([&executor] { return executor->pendingCount() == 1; }));
+        handle.cancel();
+
+        REQUIRE(handle.waitFor(5s)); // without running the executor
+        executor->runPending();
+        REQUIRE(cancellations == 1); // the queued run reports the cancellation
+    }
+
+    SECTION("through its token")
+    {
+        const auto executor = ManualExecutor::create();
+        std::stop_source stop;
+
+        auto handle = Task::run(executor.get(), stop.get_token(), 0ms, FixedRate{1ms, Overrun::Skip}, [] {}).submit();
+
+        stop.request_stop();
+        REQUIRE(handle.waitFor(5s));
+        REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
+    }
+}
+
+TEST_CASE("A fixed rate that skips ends when its executor is destroyed", "[periodic][overrun][shutdown]")
+{
+    auto executor = ManualExecutor::create();
+    auto handle = Task::run(executor.get(), 0ms, FixedRate{1ms, Overrun::Skip}, [] {}).submit();
+
+    REQUIRE(waitFor([&executor] { return executor->pendingCount() == 1; }));
+    executor.reset(); // cancels the queued run, which ends the skipping
+
+    REQUIRE(handle.waitFor(5s));
+    REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
+}
+
+TEST_CASE("A fixed rate that skips keeps going when runs end as periods start", "[periodic][overrun][stress]")
+{
+    const auto pool = ThreadPoolExecutor::create(4);
+    Overlap overlap;
+
+    // The shortest period: most runs end around the moment the next period starts.
+    auto handle =
+        Task::run(pool.get(), 0ms, FixedRate{std::chrono::microseconds{1}, Overrun::Skip}, [&overlap] { overlap.run(0ms); }).submit();
+
+    REQUIRE(waitFor([&overlap] { return overlap.runs >= 2000; }, 30s));
+    handle.cancel();
+    handle.wait();
+    REQUIRE(overlap.most == 1);
 }

@@ -24,19 +24,33 @@ namespace vanilo::tasker {
     /// ============================================================================================
 
     /**
-     * A periodic task runs at a fixed rate: every interval from its first run, whatever each run takes, so runs
-     * can overlap on a thread pool. Missed periods are skipped rather than run in a burst. A plain duration
-     * means the same.
+     * What a fixed-rate series does when the next run is due and the previous one hasn't finished (its whole chain).
+     */
+    enum class Overrun
+    {
+        Queue, // Queue the next run anyway: runs can overlap on a thread pool, and an executor that can't keep up
+               // collects them in its queue, then runs them one after the other.
+        Skip,  // Skip this period: runs never overlap or pile up. The next run comes at the next period that finds
+               // the previous run finished, so a run that never finishes holds up the series.
+    };
+
+    /**
+     * A periodic task runs at a fixed rate: its runs are due every interval from the first one, whatever each run
+     * takes. The overrun says what happens when a run is due before the previous one has finished. Periods that the
+     * timer itself missed are always skipped. A plain duration means the same as FixedRate with Overrun::Queue.
      */
     struct FixedRate
     {
         template <typename Rep, typename Period>
-        FixedRate(const std::chrono::duration<Rep, Period> interval) // NOLINT(google-explicit-constructor)
-            : interval{std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval)}
+        FixedRate(
+            const std::chrono::duration<Rep, Period> interval,
+            const Overrun overrun = Overrun::Queue) // NOLINT(google-explicit-constructor)
+            : interval{std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval)}, overrun{overrun}
         {
         }
 
         std::chrono::steady_clock::duration interval;
+        Overrun overrun;
     };
 
     /**
@@ -75,6 +89,7 @@ namespace vanilo::tasker {
         enum class PeriodicMode
         {
             FixedRate,
+            FixedRateSkip,
             FixedDelay,
         };
 

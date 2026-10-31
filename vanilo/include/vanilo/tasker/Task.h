@@ -114,6 +114,9 @@ namespace vanilo::tasker {
             }
             else if constexpr (std::is_same_v<Interval, FixedRate>) {
                 parts.period = interval.interval;
+                if (interval.overrun == Overrun::Skip) {
+                    parts.mode = PeriodicMode::FixedRateSkip;
+                }
             }
             else {
                 parts.period = toSteadyDuration(interval);
@@ -207,8 +210,8 @@ namespace vanilo::tasker {
 
         /**
          * Starts a periodic chain: first after initialDelay, then at the interval, which is a duration or
-         * FixedRate (fixed rate) or FixedDelay (a delay after each run). It runs until it is canceled through its
-         * handle, or its executor shuts down.
+         * FixedRate (fixed rate, see Overrun) or FixedDelay (a delay after each run). It runs until it is canceled
+         * through its handle, or its executor shuts down.
          * @throws std::invalid_argument if the interval isn't positive.
          */
         template <typename Rep, typename Period, detail::PeriodicInterval Interval, typename F, typename... Args>

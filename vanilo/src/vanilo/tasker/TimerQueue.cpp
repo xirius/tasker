@@ -173,6 +173,7 @@ namespace {
 
         void runFinished() noexcept;
         void scheduleNext(std::unique_ptr<TimerEntry> entry, SteadyClock::time_point due) noexcept;
+        [[nodiscard]] SteadyClock::time_point nextPeriod(SteadyClock::time_point due) const noexcept;
 
         std::mutex _mutex;
         std::unique_ptr<Node> _template;     // what each run copies; released when the series ends
@@ -181,6 +182,7 @@ namespace {
         PeriodicMode _mode;
         std::weak_ptr<TimerQueue> _queue;
         std::atomic<bool> _ended{false};
+        std::atomic<bool> _runActive{false};  // fixed rate that skips: a run hasn't finished yet
         std::stop_callback<StopSeries> _wake; // last: it may run as soon as it is constructed
     };
 
@@ -231,6 +233,14 @@ namespace {
         }
 
         const auto due = entry->due();
+
+        // The previous run hasn't finished: this period is skipped. The entry stays in the timer queue, so the
+        // series needs nothing from the run to go on, and a stop ends it like any fixed-rate series.
+        if (_mode == PeriodicMode::FixedRateSkip && _runActive.exchange(true, std::memory_order_acq_rel)) {
+            scheduleNext(std::move(entry), nextPeriod(due));
+            return;
+        }
+
         std::unique_ptr<Node> run;
         try {
             std::lock_guard lock{_mutex};
@@ -263,24 +273,25 @@ namespace {
             return;
         }
 
-        if (run && !Node::tryStart(std::move(run), shared_from_this())) {
+        if (!run) {
+            _runActive.store(false, std::memory_order_release); // no run started, so none will report its end
+        }
+        else if (!Node::tryStart(std::move(run), shared_from_this())) {
             entry.reset();
             end(); // the executor is gone
             return;
         }
 
-        // Fixed rate, drift-free: the next run is a whole number of periods after this one, skipping the
-        // periods that were missed.
-        const auto now = SteadyClock::now();
-        auto next = due + _period;
-        if (next <= now) {
-            next += _period * ((now - next) / _period + 1);
-        }
-        scheduleNext(std::move(entry), next);
+        scheduleNext(std::move(entry), nextPeriod(due));
     }
 
     void SeriesState::runFinished() noexcept
     {
+        if (_mode == PeriodicMode::FixedRateSkip) {
+            _runActive.store(false, std::memory_order_release);
+            return;
+        }
+
         if (_mode != PeriodicMode::FixedDelay) {
             return;
         }
@@ -302,6 +313,20 @@ namespace {
         }
 
         scheduleNext(std::move(entry), SteadyClock::now() + _period);
+    }
+
+    /**
+     * When the next period of a fixed-rate series starts: drift-free, a whole number of periods after this one,
+     * skipping the periods that were missed.
+     */
+    SteadyClock::time_point SeriesState::nextPeriod(const SteadyClock::time_point due) const noexcept
+    {
+        const auto now = SteadyClock::now();
+        auto next = due + _period;
+        if (next <= now) {
+            next += _period * ((now - next) / _period + 1);
+        }
+        return next;
     }
 
     void SeriesState::scheduleNext(std::unique_ptr<TimerEntry> entry, const SteadyClock::time_point due) noexcept
