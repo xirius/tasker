@@ -3,19 +3,57 @@
 
 #include <vanilo/concurrent/CancellationToken.h>
 #include <vanilo/core/Binder.h>
-#include <vanilo/core/Tracer.h>
 
 #include <any>
+#include <atomic>
 #include <cassert>
+#include <chrono>
+#include <functional>
 #include <future>
 #include <optional>
+#include <stdexcept>
+#include <thread>
 
 namespace vanilo::tasker {
+
+    class Task;
 
     /**
      * Object that manages the execution of the scheduled tasks.
      */
     class TaskExecutor;
+
+    /// Unhandled exceptions
+    /// ============================================================================================
+
+    /**
+     * Receives an exception that escaped a task: thrown by a task whose chain has neither an onException
+     * handler after it nor a future at its end, or thrown by an onException handler itself.
+     * Cancellations (OperationCanceledException) are never reported. It may be called concurrently from
+     * any executor thread.
+     */
+    using UnhandledExceptionHandler = std::function<void(const std::exception_ptr&)>;
+
+    /**
+     * Sets the process-wide handler for unhandled task exceptions. The default handler writes the
+     * exception's message to stderr; an empty handler ignores unhandled exceptions.
+     * @param handler The new handler.
+     * @return The previous handler.
+     */
+    VANILO_EXPORT UnhandledExceptionHandler setUnhandledExceptionHandler(UnhandledExceptionHandler handler);
+
+    namespace internal {
+        /**
+         * Passes an exception that escaped a task to the unhandled-exception handler. Cancellations are ignored.
+         */
+        VANILO_EXPORT void reportUnhandledException(const std::exception_ptr& exception) noexcept;
+
+        /**
+         * Cancels a task that will never be executed (its executor is shutting down): the task runs in the
+         * canceled state, so its future and onException handlers receive an OperationCanceledException.
+         */
+        VANILO_EXPORT void cancelTask(Task& task) noexcept;
+    } // namespace internal
 
     /// LifeCycleGuard | Atomic Gate
     /// ============================================================================================
@@ -37,10 +75,12 @@ namespace vanilo::tasker {
                 return false;
             }
 
-            _refs.fetch_add(1, std::memory_order_relaxed);
+            // Increment, then re-check the flag. terminate() does the mirror image (set the flag, then read
+            // the counter), so both sides need sequential consistency: with release/acquire alone each could
+            // read the other's old value (store buffering) and a caller would enter after terminate() returned.
+            _refs.fetch_add(1, std::memory_order_seq_cst);
 
-            // Double-check after incrementing to handle the race with terminate()
-            if (_isTerminated.load(std::memory_order_acquire)) {
+            if (_isTerminated.load(std::memory_order_seq_cst)) {
                 decrement();
                 return false;
             }
@@ -64,9 +104,9 @@ namespace vanilo::tasker {
          */
         void terminate()
         {
-            _isTerminated.store(true, std::memory_order_release);
+            _isTerminated.store(true, std::memory_order_seq_cst); // see tryIncrement()
             // Spin-wait until all in-flight entries are finished
-            while (_refs.load(std::memory_order_acquire) > 0) {
+            while (_refs.load(std::memory_order_seq_cst) > 0) {
                 std::this_thread::yield();
             }
         }
@@ -241,8 +281,10 @@ namespace vanilo::tasker {
         virtual size_t process(size_t maxCount) = 0;
 
         /**
-         * Processes the tasks in the queue until the provided token is canceled.
+         * Processes the tasks in the queue, waiting for new ones, until the provided token is canceled.
+         * Tasks that are already queued when the token is canceled are still processed before it returns.
          * @param token The cancellation token.
+         * @return The number of the unprocessed tasks in the queue.
          */
         virtual size_t process(const CancellationToken& token) = 0;
     };
@@ -382,8 +424,8 @@ namespace vanilo::tasker {
         template <typename T>
         using IsExecutor = std::is_base_of<TaskExecutor, std::remove_pointer_t<std::decay_t<T>>>;
 
-        template <typename Functor>
-        using TaskBuilder = Builder<Invocable, Functor, Arg, false>;
+        // Builder returned by onException: same task (and signature), without onException/getFuture.
+        using ContinuationBuilder = Builder<Invocable, Signature, Arg, false>;
 
       public:
         using Return = typename Builder<Invocable, Signature, Arg, false>::ResultType;
@@ -408,8 +450,8 @@ namespace vanilo::tasker {
         template <typename T>
         using IsExecutor = std::is_base_of<TaskExecutor, std::remove_pointer_t<std::decay_t<T>>>;
 
-        template <typename Functor>
-        using TaskBuilder = PeriodicBuilder<Invocable, Functor, Arg>;
+        // Builder returned by onException: same task (and signature).
+        using ContinuationBuilder = PeriodicBuilder<Invocable, Signature, Arg>;
 
       public:
         template <typename TaskFunc, typename... Args, typename TaskBuilder = PeriodicBuilder<void, TaskFunc, Arg>>
@@ -601,7 +643,7 @@ namespace vanilo::tasker {
                 }
 
                 if (_next->isCanceled() || _next->getToken().isCancellationRequested()) {
-                    _next.reset();
+                    cancelNext(); // the rest of the chain learns that it was canceled
                     return;
                 }
 
@@ -615,8 +657,65 @@ namespace vanilo::tasker {
                 }
 
                 // Task is canceled if it cannot be scheduled due to executor destruction
-                _next->getLastTask()->handleException(std::make_exception_ptr(concurrent::OperationCanceledException()));
+                cancelNext();
+            }
+
+            /**
+             * Drops the rest of the chain without notifying it.
+             */
+            void dropNext() noexcept
+            {
                 _next.reset();
+            }
+
+            /**
+             * Tells the rest of the chain that it will never run (see failChain) and drops it.
+             */
+            void cancelNext()
+            {
+                if (_next) {
+                    _next->failChain(std::make_exception_ptr(concurrent::OperationCanceledException()), false, _executor);
+                    _next.reset();
+                }
+            }
+
+            /**
+             * Delivers the failure of this task to its chain, whose remaining tasks never run: the nearest
+             * onException handler from this task on is called, and a future at the end of the chain receives
+             * the exception. When neither exists, the exception is rethrown (if rethrowUnhandled is set) so the
+             * executor reports it as unhandled. deliveringExecutor is the executor whose thread delivers the
+             * failure; handlers for other executors are submitted to them.
+             */
+            void failChain(const std::exception_ptr& exPtr, const bool rethrowUnhandled, TaskExecutor* deliveringExecutor)
+            {
+                bool handled = false;
+                bool delivered = false;
+
+                for (ChainableTask* task = this; task != nullptr; task = task->_next.get()) {
+                    if (!handled && task->invokeExceptionHandler(exPtr, deliveringExecutor)) {
+                        handled = true;
+                        delivered = true;
+                    }
+                    if (task->isPromised()) {
+                        task->handleException(exPtr);
+                        delivered = true;
+                    }
+                }
+
+                _next.reset();
+
+                if (!delivered && rethrowUnhandled) {
+                    std::rethrow_exception(exPtr);
+                }
+            }
+
+            /**
+             * Calls this task's onException handler, if it has one.
+             * @return True if a handler was called.
+             */
+            virtual bool invokeExceptionHandler(const std::exception_ptr& /*exPtr*/, TaskExecutor* /*deliveringExecutor*/)
+            {
+                return false;
             }
 
             [[nodiscard]] bool hasNext() const
@@ -708,10 +807,15 @@ namespace vanilo::tasker {
             template <typename Functor, typename... Args>
             void setupExceptionCallback(TaskExecutor* executor, Functor&& functor, Args&&... args)
             {
-                _errorExecutor = this->_executor == executor ? nullptr : executor;
-                _errorMetadata = std::make_any<std::tuple<Functor, std::tuple<Args...>>>(
-                    std::make_tuple(std::forward<Functor>(functor), std::forward_as_tuple(std::forward<Args>(args)...)));
-                _errorHandler = &BaseTask::errorHandlerThunk<Functor, Args...>;
+                // The handler and its arguments are stored by value (like a task's), so a handler passed by
+                // name works and nothing dangles; use std::ref for an argument meant by reference.
+                using StoredFunctor = std::decay_t<Functor>;
+                using StoredArgs = std::tuple<std::decay_t<Args>...>;
+
+                _errorExecutor = executor;
+                _errorMetadata = std::make_any<std::tuple<StoredFunctor, StoredArgs>>(
+                    StoredFunctor{std::forward<Functor>(functor)}, StoredArgs{std::forward<Args>(args)...});
+                _errorHandler = &BaseTask::errorHandlerThunk<StoredFunctor, std::decay_t<Args>...>;
             }
 
             [[nodiscard]] auto toPromisedTask() noexcept
@@ -727,17 +831,19 @@ namespace vanilo::tasker {
 
             void handleException(std::exception_ptr exPtr) override
             {
-                if (auto lastTask = this->getLastTask(); lastTask->isPromised()) {
-                    lastTask->handleException(std::move(exPtr));
-                    return;
+                this->failChain(exPtr, true, this->getExecutor());
+            }
+
+            bool invokeExceptionHandler(const std::exception_ptr& exPtr, TaskExecutor* deliveringExecutor) override
+            {
+                if (!_errorHandler) {
+                    return false;
                 }
 
-                if (_errorHandler && _errorHandler(_errorExecutor, this->getToken(), _task, _errorMetadata, exPtr)) {
-                    return;
-                }
-
-                // The task did not handle exception, so it is rethrown
-                std::rethrow_exception(exPtr);
+                // The handler runs on the executor given to onException (else this task's), inline when that is
+                // where the failure is being delivered.
+                const auto target = _errorExecutor ? _errorExecutor : this->getExecutor();
+                return _errorHandler(target == deliveringExecutor ? nullptr : target, this->getToken(), _task, _errorMetadata, exPtr);
             }
 
             template <typename T = Arg, std::enable_if_t<std::is_void_v<T>, std::nullptr_t> = nullptr>
@@ -805,13 +911,17 @@ namespace vanilo::tasker {
                 auto exceptionTask =
                     core::binder::bind(&BaseTask::exceptionHandlerBody<FunctorT, ArgsT...>, token, std::move(task), metadata, exPtr);
 
+                // Submitted to the handler's executor, unless it runs inline (nullptr) or that executor is
+                // shutting down, where it would only be canceled: then it runs inline as well.
                 if (currentExecutor != nullptr) {
-                    currentExecutor->submit(
-                        std::make_unique<Invocable<decltype(exceptionTask), void, void>>(currentExecutor, std::move(exceptionTask)));
+                    if (const auto lock = currentExecutor->getGuard()->acquire()) {
+                        currentExecutor->submit(
+                            std::make_unique<Invocable<decltype(exceptionTask), void, void>>(currentExecutor, std::move(exceptionTask)));
+                        return true;
+                    }
                 }
-                else {
-                    exceptionTask();
-                }
+
+                exceptionTask();
 
                 return true; // Exception was handled
             }
@@ -820,7 +930,7 @@ namespace vanilo::tasker {
             static void exceptionHandlerBody(
                 CancellationToken& innerToken, Callable& innerTask, std::any& innerMetadata, const std::exception_ptr& innerExPtr)
             {
-                auto [func, args1] = std::move(std::any_cast<std::tuple<FunctorT, std::tuple<ArgsT...>>>(innerMetadata));
+                auto [func, args1] = std::move(std::any_cast<std::tuple<FunctorT, std::tuple<ArgsT...>>&>(innerMetadata));
 
                 try {
                     try {
@@ -839,7 +949,7 @@ namespace vanilo::tasker {
                     }
                 }
                 catch (...) {
-                    TRACE("An unexpected exception occurred during execution of onException callback!");
+                    reportUnhandledException(std::current_exception());
                 }
             }
 
@@ -1053,10 +1163,10 @@ namespace vanilo::tasker {
                     }
                 }
                 catch (concurrent::OperationCanceledException& ex) {
-                    this->handleException(std::make_exception_ptr(ex));
+                    this->failChain(std::make_exception_ptr(ex), true, this->getExecutor());
                 }
                 catch (...) {
-                    this->handleException(std::current_exception());
+                    this->failChain(std::current_exception(), true, this->getExecutor());
                 }
             }
         };
@@ -1104,10 +1214,10 @@ namespace vanilo::tasker {
                     }
                 }
                 catch (concurrent::OperationCanceledException& ex) {
-                    this->handleException(std::make_exception_ptr(ex));
+                    this->failChain(std::make_exception_ptr(ex), true, this->getExecutor());
                 }
                 catch (...) {
-                    this->handleException(std::current_exception());
+                    this->failChain(std::current_exception(), true, this->getExecutor());
                 }
             }
         };
@@ -1144,10 +1254,10 @@ namespace vanilo::tasker {
                     this->scheduleNext();
                 }
                 catch (concurrent::OperationCanceledException& ex) {
-                    this->handleException(std::make_exception_ptr(ex));
+                    this->failChain(std::make_exception_ptr(ex), true, this->getExecutor());
                 }
                 catch (...) {
-                    this->handleException(std::current_exception());
+                    this->failChain(std::current_exception(), true, this->getExecutor());
                 }
             }
         };
@@ -1184,10 +1294,10 @@ namespace vanilo::tasker {
                     this->scheduleNext();
                 }
                 catch (concurrent::OperationCanceledException& ex) {
-                    this->handleException(std::make_exception_ptr(ex));
+                    this->failChain(std::make_exception_ptr(ex), true, this->getExecutor());
                 }
                 catch (...) {
-                    this->handleException(std::current_exception());
+                    this->failChain(std::current_exception(), true, this->getExecutor());
                 }
             }
         };
@@ -1207,7 +1317,7 @@ namespace vanilo::tasker {
                 auto task = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Args>(args)...);
                 auto invocable = std::make_unique<Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
                 invocable->setToken(std::move(token));
-                return std::move(invocable);
+                return invocable;
             }
         };
 
@@ -1220,7 +1330,7 @@ namespace vanilo::tasker {
                 auto task = core::binder::bind(std::forward<TaskFunc>(func), token, std::forward<Args>(args)...);
                 auto invocable = std::make_unique<Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
                 invocable->setToken(std::move(token));
-                return std::move(invocable);
+                return invocable;
             }
         };
 
@@ -1233,7 +1343,7 @@ namespace vanilo::tasker {
                 auto task = core::binder::bind(std::forward<TaskFunc>(func), std::forward<Arg1>(arg1), token, std::forward<Args>(args)...);
                 auto invocable = std::make_unique<Invocable<decltype(task), Result, Arg>>(executor, std::move(task));
                 invocable->setToken(std::move(token));
-                return std::move(invocable);
+                return invocable;
             }
         };
 
@@ -1246,9 +1356,22 @@ namespace vanilo::tasker {
 
         inline BaseTaskBuilder::~BaseTaskBuilder()
         {
-            if (_task) { // Schedule task on the executor
-                const auto executor = _task->getExecutor();
-                executor->submit(std::move(_task));
+            if (!_task) {
+                return;
+            }
+
+            try {
+                if (const auto lock = _task->acquireGuard()) { // Schedule task on the executor
+                    const auto executor = _task->getExecutor();
+                    executor->submit(std::move(_task));
+                    return;
+                }
+
+                // The executor is shutting down (or missing): the task is canceled instead of submitted.
+                cancelTask(*_task);
+            }
+            catch (...) {
+                reportUnhandledException(std::current_exception());
             }
         }
 
@@ -1322,7 +1445,7 @@ namespace vanilo::tasker {
     {
         auto task = static_cast<Invocable*>(this->_task->getLastTask());
         task->setupExceptionCallback(executor, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
-        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
+        return ContinuationBuilder{std::move(this->_task), this->_current, this->_last};
     }
 
     template <typename Invocable, typename Signature, typename Arg>
@@ -1330,8 +1453,8 @@ namespace vanilo::tasker {
     auto Task::Builder<Invocable, Signature, Arg>::onException(TaskFunc&& func, Args&&... args)
     {
         auto task = static_cast<Invocable*>(this->_task->getLastTask());
-        task->setupExceptionCallback(this->_task->getExecutor(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
-        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
+        task->setupExceptionCallback(task->getExecutor(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        return ContinuationBuilder{std::move(this->_task), this->_current, this->_last};
     }
 
     /// Task::PeriodicBuilder implementation
@@ -1361,7 +1484,7 @@ namespace vanilo::tasker {
     {
         auto task = static_cast<Invocable*>(this->_task->getLastTask());
         task->setupExceptionCallback(executor, std::forward<TaskFunc>(func), std::forward<Args>(args)...);
-        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
+        return ContinuationBuilder{std::move(this->_task), this->_current, this->_last};
     }
 
     template <typename Invocable, typename Signature, typename Arg>
@@ -1369,8 +1492,8 @@ namespace vanilo::tasker {
     auto Task::PeriodicBuilder<Invocable, Signature, Arg>::onException(TaskFunc&& func, Args&&... args)
     {
         auto task = static_cast<Invocable*>(this->_task->getLastTask());
-        task->setupExceptionCallback(this->_task->getExecutor(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
-        return TaskBuilder<TaskFunc>{std::move(this->_task), this->_current, this->_last};
+        task->setupExceptionCallback(task->getExecutor(), std::forward<TaskFunc>(func), std::forward<Args>(args)...);
+        return ContinuationBuilder{std::move(this->_task), this->_current, this->_last};
     }
 
     /// Task implementation
@@ -1424,6 +1547,10 @@ namespace vanilo::tasker {
         TaskFunc&& func,
         Args&&... args)
     {
+        if (interval <= std::chrono::duration<Rep2, Period2>::zero()) {
+            throw std::invalid_argument{"The interval of a periodic task must be positive."};
+        }
+
         constexpr bool HasToken = std::is_same_v<std::decay_t<typename TaskBuilder::FirstArg>, CancellationToken>;
         constexpr bool IsMember = core::traits::FunctionTraits<TaskFunc>::IsMemberFnPtr;
 

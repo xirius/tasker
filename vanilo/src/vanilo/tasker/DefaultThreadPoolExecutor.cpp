@@ -37,9 +37,11 @@ class StopThreadTask final: public Task
         _cancelled.store(true, std::memory_order_release);
     }
 
-    [[noreturn]] void run() override
+    void run() override
     {
-        if (!_cancelled.load(std::memory_order_acquire)) {
+        const bool cancelled = _cancelled.load(std::memory_order_acquire);
+
+        if (!cancelled) {
             std::lock_guard lock{_mutex};
             if (const auto it = _threads.find(std::this_thread::get_id()); it != _threads.end()) {
                 it->second.detach(); // NOSONAR
@@ -53,7 +55,10 @@ class StopThreadTask final: public Task
             _promise->set_value();
         }
 
-        throw StopThreadException{};
+        if (!cancelled) {
+            throw StopThreadException{}; // ends the worker loop of the thread that ran it
+        }
+        // A cancelled stop task is run by invalidate() on the destroying thread: nothing to stop there.
     }
 
   private:
@@ -150,7 +155,9 @@ std::future<void> DefaultThreadPoolExecutor::resize(const size_t numThreads)
 
 void DefaultThreadPoolExecutor::submit(std::unique_ptr<Task> task)
 {
-    _queue.enqueue(std::move(task));
+    if (!_queue.enqueue(std::move(task))) { // The queue is closed: the executor is being destroyed
+        internal::cancelTask(*task);
+    }
 }
 
 //! Private members
@@ -161,7 +168,7 @@ void DefaultThreadPoolExecutor::init(const size_t numThreads)
     }
     catch (...) {
         invalidate();
-        TRACE("An unhandled exception occurred during initialisation of the DefaultThreadPoolExecutor!");
+        VANILO_TRACE("An unhandled exception occurred during initialisation of the DefaultThreadPoolExecutor!");
         throw;
     }
 }
@@ -176,14 +183,9 @@ void DefaultThreadPoolExecutor::invalidate()
         tasks = _queue.close();
     }
 
+    // The pending tasks will never run: cancel them, so their futures and onException handlers know.
     for (const auto& task : tasks) {
-        try {
-            task->cancel();
-            task->run();
-        }
-        catch (...) { // NOSONAR
-            // Ignore
-        }
+        internal::cancelTask(*task);
     }
 
     std::vector<std::thread> threadsToJoin;
@@ -218,14 +220,8 @@ void DefaultThreadPoolExecutor::worker()
             // Gracefully stop the thread execution
             return;
         }
-        catch (const OperationCanceledException&) { // NOSONAR
-            // Ignore
-        }
-        catch (const std::exception& ex) {
-            TRACE("An unhandled exception occurred during execution of the task. Message: %s", ex.what());
-        }
         catch (...) {
-            TRACE("An unhandled exception occurred during execution of the task!");
+            internal::reportUnhandledException(std::current_exception());
         }
     }
 }

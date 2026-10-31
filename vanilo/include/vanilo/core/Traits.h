@@ -2,6 +2,7 @@
 #define INC_5CCBDE6C07F04D0090FDBF17F4FDADC7
 
 #include <tuple>
+#include <type_traits>
 
 namespace vanilo::core::traits {
 
@@ -15,10 +16,15 @@ namespace vanilo::core::traits {
     /// Function traits
     /// ============================================================================================
 
+    /**
+     * Describes a callable: free function, function pointer, member function pointer or function object.
+     * References and cv-qualifiers are ignored, so a named callable (an lvalue) works like a temporary.
+     */
     template <typename Signature>
-    struct FunctionTraits: internal::FunctionTraitsBase<Signature>
+    struct FunctionTraits: internal::FunctionTraitsBase<std::remove_cv_t<std::remove_reference_t<Signature>>>
     {
-        static constexpr bool IsMemberFnPtr = std::is_member_function_pointer<Signature>::value;
+        static constexpr bool IsMemberFnPtr =
+            std::is_member_function_pointer<std::remove_cv_t<std::remove_reference_t<Signature>>>::value;
     };
 
     namespace internal {

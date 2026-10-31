@@ -23,22 +23,10 @@ namespace vanilo::core {
     /// Debugging facilities
     /// ============================================================================================
 
-#if defined NDEBUG
-#define TRACE(ignore, ...) ((void)0)
-#define VERIFY(expression) expression
-#else
-#define VERIFY ASSERT
-#define TRACE              \
-    vanilo::core::Tracer   \
-    {                      \
-        __FILE__, __LINE__ \
-    }
-
-#define ASSERT(expr) \
-    for (int s{1}; s-- && !(expr); assert(expr)) TRACE
-
     /**
-     * Tracer helper class.
+     * Writes a printf-style message, prefixed with its source location, to stderr. Use it through
+     * VANILO_TRACE, which compiles to nothing in release builds (NDEBUG). The class itself is always
+     * available, so a release library can be used from a debug build and vice versa.
      */
     class VANILO_EXPORT Tracer final
     {
@@ -46,40 +34,45 @@ namespace vanilo::core {
         Tracer(const char* filename, unsigned line) noexcept;
 
         template <typename... Args>
-        void operator()(const char* format, const Args&... args) noexcept
+        void operator()(const char* format, const Args&... args) const noexcept
         {
-            char buffer[BUFFER_SIZE];
-            auto count = snprintf(buffer, countOf(buffer), "%s(%d): ", _filename, _line);
+            char buffer[BufferSize];
+            const int count = std::snprintf(buffer, BufferSize, "%s(%u): ", _filename, _line);
 
-            ASSERT(count >= 0 && count < static_cast<int>(countOf(buffer)));
+            if (count < 0) {
+                return;
+            }
 
-            count = (sizeof...(args) ? append(buffer, count, format, args...) : append(buffer, count, format));
+            // snprintf returns the untruncated length, so only append if the prefix fitted.
+            if (static_cast<std::size_t>(count) < BufferSize) {
+                if constexpr (sizeof...(args) > 0) {
+                    std::snprintf(buffer + count, BufferSize - count, format, args...);
+                }
+                else {
+                    std::snprintf(buffer + count, BufferSize - count, "%s", format);
+                }
+            }
 
-            ASSERT(count >= 0 && count < static_cast<int>(countOf(buffer)));
-
-            std::cerr << buffer << std::endl;
+            std::cerr << buffer << std::endl; // snprintf always null-terminates, even when truncating
         }
 
       private:
-        static constexpr size_t BUFFER_SIZE = 256;
-
-        template <typename... Args>
-        int append(char* buffer, int count, const char* format, const Args&... args) const noexcept
-        {
-            return snprintf(buffer + count, BUFFER_SIZE - count, format, args...);
-        }
-
-        static int append(char* buffer, const int count, const char* format) noexcept
-        {
-            return snprintf(buffer + count, BUFFER_SIZE - count, "%s", format);
-        }
+        static constexpr std::size_t BufferSize = 256;
 
         const char* _filename;
-        const unsigned _line;
+        unsigned _line;
     };
 
-#endif
-
 } // namespace vanilo::core
+
+#if defined NDEBUG
+#define VANILO_TRACE(...) ((void)0)
+#define VANILO_ASSERT(expression) ((void)0)
+#define VANILO_VERIFY(expression) ((void)(expression))
+#else
+#define VANILO_TRACE vanilo::core::Tracer{__FILE__, __LINE__}
+#define VANILO_ASSERT(expression) assert(expression)
+#define VANILO_VERIFY(expression) assert(expression)
+#endif
 
 #endif // INC_A276C213E55E4D9A9BDCED4035E01132

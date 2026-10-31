@@ -152,7 +152,7 @@ namespace vanilo::concurrent {
      *
      * Thread-safety: all member functions are safe to call concurrently. `cancel()` is idempotent.
      */
-    class CancellationTokenSource
+    class VANILO_EXPORT CancellationTokenSource
     {
       public:
         CancellationTokenSource();

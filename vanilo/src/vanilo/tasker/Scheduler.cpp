@@ -1,6 +1,7 @@
 #include "vanilo/tasker/Scheduler.h"
 
 #include <memory>
+#include <vector>
 
 using namespace vanilo::concurrent;
 using namespace vanilo::tasker;
@@ -123,12 +124,24 @@ void ScheduledTask::setInterval(const std::optional<steady_clock::duration> inte
     _interval = interval;
 }
 
+void ScheduledTask::cancelPending()
+{
+    cancel();
+
+    if (isPeriodic()) {
+        dropNext();
+    }
+    else {
+        cancelNext();
+    }
+}
+
 [[nodiscard]] bool ScheduledTask::isPromised() const noexcept
 {
     return false;
 }
 
-void ScheduledTask::handleException(std::exception_ptr exPtr)
+void ScheduledTask::handleException(std::exception_ptr /*exPtr*/)
 {
     // It is not supposed to throw
 }
@@ -147,10 +160,43 @@ TaskScheduler::TaskScheduler(): _worker([this] { worker(); })
 
 TaskScheduler::~TaskScheduler() noexcept
 {
-    _stop.store(true, std::memory_order_relaxed);
-    _condition.notify_one();
+    // No continuations can be scheduled on this scheduler from now on.
+    getGuard()->terminate();
+
+    {
+        // Set under the mutex: the worker checks the flag and starts waiting while holding it,
+        // so it cannot miss the wake-up and leave join() waiting forever.
+        std::lock_guard lock{_mutex};
+        _stop.store(true, std::memory_order_relaxed);
+    }
+    _condition.notify_all();
+
     if (_worker.joinable()) {
         _worker.join();
+    }
+
+    // The pending scheduled tasks will never run. They are canceled outside the lock, because their
+    // onException handlers may schedule new work.
+    std::vector<std::unique_ptr<ScheduledTask>> pending;
+    {
+        std::lock_guard lock{_mutex};
+        while (!_queue.empty()) {
+            pending.push_back(std::move(_queue.extract(_queue.begin()).value()));
+        }
+    }
+
+    for (const auto& task : pending) {
+        cancel(*task);
+    }
+}
+
+void TaskScheduler::cancel(ScheduledTask& task) noexcept
+{
+    try {
+        task.cancelPending();
+    }
+    catch (...) {
+        internal::reportUnhandledException(std::current_exception());
     }
 }
 
@@ -213,19 +259,16 @@ void TaskScheduler::worker()
         }
 
         // Execute outside the lock
-        if (!current->isCanceled() && !current->getToken().isCancellationRequested()) {
-            try {
-                current->run();
-            }
-            catch (const concurrent::OperationCanceledException&) { // NOSONAR
-                // Ignore
-            }
-            catch (const std::exception& ex) {
-                TRACE("An unhandled exception occurred during execution of the task. Message: %s", ex.what());
-            }
-            catch (...) {
-                TRACE("An unhandled exception occurred during execution of the task!");
-            }
+        if (current->isCanceled() || current->getToken().isCancellationRequested()) {
+            cancel(*current);
+            continue;
+        }
+
+        try {
+            current->run();
+        }
+        catch (...) {
+            internal::reportUnhandledException(std::current_exception());
         }
 
         // Reschedule if periodic
@@ -268,6 +311,7 @@ std::unique_ptr<ScheduledTask> TaskScheduler::popTopLocked()
 void TaskScheduler::rescheduleIfNeeded(std::unique_ptr<ScheduledTask>& current)
 {
     if (current->isCanceled() || current->getToken().isCancellationRequested()) {
+        cancel(*current); // e.g. a periodic task whose token was canceled while it ran
         return;
     }
 

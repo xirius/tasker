@@ -5,6 +5,7 @@
 #include <vanilo/core/Utility.h>
 
 #include <cstdlib>
+#include <functional>
 
 namespace vanilo::core::binder {
     namespace internal {
@@ -34,7 +35,7 @@ namespace vanilo::core::binder {
         /// ========================================================================================
 
         template <typename Signature>
-        struct Bind;
+        class Bind;
 
         template <typename Func, typename... Args>
         struct BindHelper: public ArityChecker<typename std::decay_t<Func>, Args...>
@@ -104,9 +105,9 @@ namespace vanilo::core::binder {
 
           private:
             template <typename Result, typename... Args, std::size_t... Indexes1, std::size_t... Indexes2>
-            Result call(std::tuple<Args...> args, std::index_sequence<Indexes1...>, std::index_sequence<Indexes2...>)
+            Result call([[maybe_unused]] std::tuple<Args...> args, std::index_sequence<Indexes1...>, std::index_sequence<Indexes2...>)
             {
-                return std::__invoke(
+                return std::invoke(
                     _functor, RefUnwrapper<BoundArgs>()(std::get<Indexes1>(_boundArgs))...,
                     RefUnwrapper<Args>()(std::get<Indexes2>(args))...);
             }

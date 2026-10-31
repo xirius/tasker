@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 using namespace vanilo::concurrent;
@@ -17,10 +19,15 @@ struct CancellationToken::Subscription::Impl
     {
     }
 
+    /**
+     * Removes the callback. If it is running on another thread, waits until it has finished, so that the
+     * caller can safely destroy whatever the callback uses. A callback may unsubscribe itself.
+     */
     void unsubscribe() noexcept
     {
-        std::lock_guard lock{mutex};
+        std::unique_lock lock{mutex};
         _callback = nullptr;
+        _finished.wait(lock, [this] { return !_running || _runningThread == std::this_thread::get_id(); });
     }
 
     void notify() noexcept
@@ -29,29 +36,39 @@ struct CancellationToken::Subscription::Impl
         {
             std::lock_guard lock{mutex};
             callback = std::move(_callback); // move under lock => no data race and future calls are no-op
-        }
-
-        if (!callback) {
-            return;
+            if (!callback) {
+                return;
+            }
+            _running = true;
+            _runningThread = std::this_thread::get_id();
         }
 
         try {
             callback();
         }
         catch (const std::exception& ex) {
-            TRACE("An unhandled exception occurred during cancellation notification. Message: %s", ex.what());
+            VANILO_TRACE("An unhandled exception occurred during cancellation notification. Message: %s", ex.what());
         }
         catch (...) {
-            TRACE("An unhandled exception occurred during cancellation notification!");
+            VANILO_TRACE("An unhandled exception occurred during cancellation notification!");
         }
+
+        {
+            std::lock_guard lock{mutex};
+            _running = false;
+        }
+        _finished.notify_all();
     }
 
     std::function<void()> _callback;
+    bool _running{false};
+    std::thread::id _runningThread{};
+    std::condition_variable _finished{};
     std::mutex mutex{};
 };
 
-/// Subscription
-/// ========================================================================
+/// CancellationToken::Subscription implementation
+/// ================================================================================================
 
 CancellationToken::Subscription::Subscription(std::shared_ptr<Impl> impl) noexcept: _impl{std::move(impl)}
 {

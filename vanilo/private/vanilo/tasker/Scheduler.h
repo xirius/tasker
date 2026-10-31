@@ -51,6 +51,13 @@ namespace vanilo::tasker {
 
         void setInterval(std::optional<steady_clock::duration> interval);
 
+        /**
+         * Cancels this scheduled task, which will never run. A one-shot task's chain is told (its future and
+         * onException handlers receive an OperationCanceledException); a periodic series just ends, as only
+         * its individual runs report cancellation.
+         */
+        void cancelPending();
+
       private:
         [[nodiscard]] bool isPromised() const noexcept override;
         void handleException([[maybe_unused]] std::exception_ptr exPtr) override;
@@ -95,6 +102,7 @@ namespace vanilo::tasker {
         bool waitUntilTopIsDue(std::unique_lock<std::mutex>& lock);
         std::unique_ptr<ScheduledTask> popTopLocked();
         void rescheduleIfNeeded(std::unique_ptr<ScheduledTask>& current);
+        static void cancel(ScheduledTask& task) noexcept;
 
         std::atomic_bool _stop{false};
         mutable std::mutex _mutex;

@@ -2,14 +2,9 @@
 
 using namespace vanilo::core;
 
-#if !defined NDEBUG
+/// Tracer
+/// ================================================================================================
 
-/// --- Tracer class
-/// ============================================================================
-
-Tracer::Tracer(const char* filename, const unsigned line) noexcept
-    :_filename{ filename }, _line{ line }
+Tracer::Tracer(const char* filename, const unsigned line) noexcept: _filename{filename}, _line{line}
 {
 }
-
-#endif

@@ -10,22 +10,23 @@ inline void executeTask(Task* task)
     try {
         task->run();
     }
-    catch (const std::exception& ex) {
-        TRACE("An unhandled exception occurred during execution of the task. Message: %s", ex.what());
-    }
     catch (...) {
-        TRACE("An unhandled exception occurred during execution of the task!");
+        internal::reportUnhandledException(std::current_exception());
     }
 }
 
-/// DefaultThreadPoolExecutor implementation
+/// DefaultLocalThreadExecutor implementation
 /// ================================================================================================
 
 DefaultLocalThreadExecutor::~DefaultLocalThreadExecutor()
 {
     // Ensure that no more tasks can be scheduled on this executor from now on.
     getGuard()->terminate();
-    _queue.close();
+
+    // The pending tasks will never run: cancel them, so their futures and onException handlers know.
+    for (const auto& task : _queue.close()) {
+        internal::cancelTask(*task);
+    }
 }
 
 size_t DefaultLocalThreadExecutor::count() const
@@ -65,5 +66,7 @@ size_t DefaultLocalThreadExecutor::process(const CancellationToken& token)
 
 void DefaultLocalThreadExecutor::submit(std::unique_ptr<Task> task)
 {
-    _queue.enqueue(std::move(task));
+    if (!_queue.enqueue(std::move(task))) { // The queue is closed: the executor is being destroyed
+        internal::cancelTask(*task);
+    }
 }
