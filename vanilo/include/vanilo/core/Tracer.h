@@ -7,18 +7,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <iostream>
-#include <type_traits>
+#include <source_location>
 
 namespace vanilo::core {
-
-    /**
-     * @return The size of the static array.
-     */
-    template <typename T, size_t N>
-    constexpr size_t countOf(T (&)[N]) noexcept
-    {
-        return std::extent<T[N]>::value;
-    }
 
     /// Debugging facilities
     /// ============================================================================================
@@ -31,6 +22,15 @@ namespace vanilo::core {
     class VANILO_EXPORT Tracer final
     {
       public:
+        /**
+         * @param location The location written before the message: by default, where the tracer is created.
+         */
+        explicit Tracer(std::source_location location = std::source_location::current()) noexcept;
+
+        /**
+         * @param filename The file name written before the message.
+         * @param line The line number written before the message.
+         */
         Tracer(const char* filename, unsigned line) noexcept;
 
         template <typename... Args>
@@ -70,7 +70,7 @@ namespace vanilo::core {
 #define VANILO_ASSERT(expression) ((void)0)
 #define VANILO_VERIFY(expression) ((void)(expression))
 #else
-#define VANILO_TRACE vanilo::core::Tracer{__FILE__, __LINE__}
+#define VANILO_TRACE vanilo::core::Tracer{}
 #define VANILO_ASSERT(expression) assert(expression)
 #define VANILO_VERIFY(expression) assert(expression)
 #endif

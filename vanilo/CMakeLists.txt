@@ -12,8 +12,8 @@ file(GLOB_RECURSE VANILO_SOURCES CONFIGURE_DEPENDS
 add_library(Vanilo ${VANILO_SOURCES})
 add_library(Vanilo::Vanilo ALIAS Vanilo)
 
-# C++17 is the minimum; consumers may build it with a newer standard.
-target_compile_features(Vanilo PUBLIC cxx_std_17)
+# C++20 is the minimum; consumers may build it with a newer standard.
+target_compile_features(Vanilo PUBLIC cxx_std_20)
 set_target_properties(Vanilo PROPERTIES
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON  # a static Vanilo can be linked into shared libraries

@@ -96,6 +96,16 @@ TEST_CASE("Tracer writes the source location and the formatted message to stderr
     REQUIRE(capture.text() == "file.cpp(42): value 7\nother.cpp(3): no arguments\n");
 }
 
+TEST_CASE("Tracer writes where it was created by default", "[tracer]")
+{
+    const StandardErrorCapture capture;
+
+    const auto line = __LINE__ + 1;
+    Tracer{}("here");
+
+    REQUIRE_THAT(capture.text(), Catch::Matchers::ContainsSubstring("CoreTests.cpp(" + std::to_string(line) + "): here"));
+}
+
 TEST_CASE("Tracer truncates long output instead of overflowing its buffer", "[tracer]")
 {
     const StandardErrorCapture capture;
