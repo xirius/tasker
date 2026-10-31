@@ -105,3 +105,37 @@ TEST_CASE("A pool can be destroyed by one of its own tasks", "[ThreadPoolExecuto
 
     REQUIRE(waitFor([&destroyed] { return destroyed.load(); }));
 }
+
+TEST_CASE("Tasks queued by a pool thread are shared with the idle threads", "[ThreadPoolExecutor][stealing]")
+{
+    const auto executor = ThreadPoolExecutor::create(4);
+    std::atomic<int> done{0};
+    const auto start = std::chrono::steady_clock::now();
+
+    // One task queues the others on its own thread's queue: the other threads must take them.
+    Task::post(executor.get(), [&executor, &done] {
+        for (int i = 0; i < 8; ++i) {
+            Task::post(executor.get(), [&done] {
+                std::this_thread::sleep_for(50ms);
+                ++done;
+            });
+        }
+    });
+
+    REQUIRE(waitFor([&done] { return done == 8; }));
+    CHECK((std::chrono::steady_clock::now() - start) < 300ms); // 8 × 50 ms one after the other would be 400 ms
+}
+
+TEST_CASE("A pool task can wait for a task it queued", "[ThreadPoolExecutor][stealing]")
+{
+    const auto executor = ThreadPoolExecutor::create(2);
+    std::this_thread::sleep_for(20ms); // let the other thread fall asleep
+
+    auto outer = Task::run(executor.get(), [&executor] {
+        auto inner = Task::run(executor.get(), [] { return 21; }).submit();
+        return inner.get() * 2; // the other thread takes the inner task from this thread's queue
+    }).submit();
+
+    REQUIRE(outer.waitFor(5s));
+    REQUIRE(outer.get() == 42);
+}
