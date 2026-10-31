@@ -1,10 +1,15 @@
 #include "TestUtilities.h"
 
+#include <vanilo/concurrent/ShutdownGate.h>
+#include <vanilo/core/Tracer.h>
 #include <vanilo/tasker/Tasker.h>
 
 #include <catch2/catch_all.hpp>
 
+#include <algorithm>
 #include <atomic>
+#include <future>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -275,6 +280,30 @@ TEST_CASE("README: a periodic chain with a fixed delay", "[readme]")
     series.cancel();
 }
 
+TEST_CASE("README: a periodic chain with a fixed rate that skips", "[readme]")
+{
+    enum class Status
+    {
+        Ok
+    };
+
+    auto pool = ThreadPoolExecutor::create(2);
+    auto loop = ManualExecutor::create();
+    std::atomic<int> shown{0};
+
+    auto series =
+        Task::run(pool.get(), 0ms, FixedRate{2ms, Overrun::Skip}, [] { return Status::Ok; }).then(loop.get(), [&shown](Status) {
+        ++shown;
+    }).submit();
+
+    REQUIRE(waitFor([&] {
+        loop->runPending();
+        return shown >= 2;
+    }));
+    series.cancel();
+    REQUIRE(series.waitFor(5s));
+}
+
 TEST_CASE("README: running chains together", "[readme]")
 {
     auto pool = ThreadPoolExecutor::create(2);
@@ -300,4 +329,219 @@ TEST_CASE("README: running chains together", "[readme]")
 
     const auto winner = fastest.get();
     REQUIRE((winner.index() == 0 || winner.index() == 1));
+}
+
+namespace {
+    struct Sensor
+    {
+        [[nodiscard]] double read() const
+        {
+            return value;
+        }
+
+        double value = 0;
+    };
+} // namespace
+
+TEST_CASE("README: joining a vector of chains", "[readme]")
+{
+    auto pool = ThreadPoolExecutor::create(2);
+    const std::vector<Sensor> sensors{{19.5}, {21.0}};
+
+    std::vector<TaskBuilder<double>> readings;
+    for (const auto& sensor : sensors) {
+        readings.push_back(Task::run(pool.get(), [&sensor] { return sensor.read(); }));
+    }
+
+    auto all = whenAll(std::move(readings)).submit();
+
+    REQUIRE(all.get() == std::vector<double>{19.5, 21.0});
+}
+
+namespace {
+    class FlushTask final: public Task
+    {
+      public:
+        explicit FlushTask(std::atomic<int>& flushed): _flushed{flushed}
+        {
+        }
+
+        void run() override
+        {
+            ++_flushed;
+        }
+
+        void cancel() noexcept override
+        {
+        }
+
+      private:
+        std::atomic<int>& _flushed;
+    };
+} // namespace
+
+TEST_CASE("README: a Task object", "[readme]")
+{
+    auto pool = ThreadPoolExecutor::create(1);
+    std::atomic<int> flushed{0};
+
+    pool->submit(std::make_unique<FlushTask>(flushed));
+
+    REQUIRE(waitFor([&flushed] { return flushed == 1; }));
+}
+
+TEST_CASE("README: cancellations reach handlers and recoveries", "[readme]")
+{
+    auto loop = ManualExecutor::create();
+
+    SECTION("a std::exception handler receives them")
+    {
+        bool received = false;
+        auto handle = Task::run(loop.get(), [] {}).onError([&received](const std::exception&) { received = true; }).submit();
+        handle.cancel();
+        loop->runPending();
+        REQUIRE(received);
+    }
+
+    SECTION("a handler of a more specific type doesn't")
+    {
+        bool received = false;
+        auto handle = Task::run(loop.get(), [] {}).onError([&received](const std::logic_error&) { received = true; }).submit();
+        handle.cancel();
+        loop->runPending();
+        REQUIRE_FALSE(received);
+    }
+
+    SECTION("a recovery as the last step gives the handle its value")
+    {
+        auto handle = Task::run(loop.get(), [] { return 1; }).recover([](const std::exception&) { return 2; }).submit();
+        handle.cancel();
+        loop->runPending();
+        REQUIRE(handle.get() == 2);
+    }
+
+    SECTION("the tasks after a recovery still don't run")
+    {
+        bool ran = false;
+        auto handle = Task::run(loop.get(), [] { return 1; }).recover([](const std::exception&) {
+            return 2;
+        }).then(loop.get(), [&ran](int) {
+            ran = true;
+        }).submit();
+        handle.cancel();
+        loop->runPending();
+        REQUIRE_FALSE(ran);
+        REQUIRE_THROWS_AS(handle.get(), OperationCanceledException);
+    }
+}
+
+TEST_CASE("README: a handler on another executor can run after the handle is ready", "[readme]")
+{
+    auto loop = ManualExecutor::create();
+    auto other = ManualExecutor::create();
+    bool handled = false;
+
+    auto handle = Task::run(loop.get(), [] { throw std::runtime_error{"failed"}; })
+                      .onError(other.get(), [&handled](const std::exception&) {
+        handled = true;
+    }).submit();
+
+    loop->runPending();
+    REQUIRE(handle.isReady());
+    REQUIRE_FALSE(handled);
+
+    other->runPending();
+    REQUIRE(handled);
+}
+
+TEST_CASE("README: a fixed-rate series piles up on an executor that doesn't keep up", "[readme]")
+{
+    auto loop = ManualExecutor::create();
+    std::atomic<int> runs{0};
+
+    auto ticker = Task::run(loop.get(), 0ms, 1ms, [&runs] { ++runs; }).submit();
+
+    REQUIRE(waitFor([&loop] { return loop->pendingCount() >= 3; }));
+    REQUIRE(runs == 0);
+
+    ticker.cancel();
+    REQUIRE(ticker.waitFor(5s));
+}
+
+TEST_CASE("README: what a mutable lambda changes is gone by the next periodic run", "[readme]")
+{
+    auto loop = ManualExecutor::create();
+    std::atomic<int> runs{0};
+    std::atomic<int> highest{0};
+
+    auto ticker = Task::run(loop.get(), 0ms, 1ms, [&runs, &highest, count = 0]() mutable {
+        highest = std::max(highest.load(), ++count);
+        ++runs;
+    }).submit();
+
+    REQUIRE(waitFor([&] {
+        loop->runPending();
+        return runs >= 3;
+    }));
+    ticker.cancel();
+    REQUIRE(ticker.waitFor(5s));
+    REQUIRE(highest == 1);
+}
+
+TEST_CASE("README: a join doesn't wait for the chains it stops", "[readme]")
+{
+    auto pool = ThreadPoolExecutor::create(2);
+    std::promise<void> release;
+    std::atomic<bool> started{false};
+    std::atomic<bool> finished{false};
+
+    auto join = whenAll(
+                    Task::run(
+                        pool.get(),
+                        [&started, &finished, wait = release.get_future().share()] {
+        started = true;
+        wait.wait();
+        finished = true;
+    }),
+                    Task::run(pool.get(), [&started] {
+        waitFor([&started] { return started.load(); }); // or the join's stop would cancel the other task before it starts
+        throw std::runtime_error{"failed"};
+    })).submit();
+
+    REQUIRE_THROWS_AS(join.get(), std::runtime_error);
+    REQUIRE_FALSE(finished);
+
+    release.set_value();
+    REQUIRE(waitFor([&finished] { return finished.load(); }));
+}
+
+TEST_CASE("README: ShutdownGate", "[readme]")
+{
+    ShutdownGate gate;
+    int used = 0;
+
+    if (const auto entry = gate.enter()) {
+        ++used;
+    }
+
+    gate.close();
+
+    if (const auto entry = gate.enter()) {
+        ++used;
+    }
+    REQUIRE(used == 1);
+    REQUIRE(gate.isClosed());
+}
+
+TEST_CASE("README: the debug macros", "[readme]")
+{
+    [[maybe_unused]] const int count = 0;
+    int closed = 0;
+    auto closeFile = [&closed] { return ++closed == 1 ? 0 : -1; };
+
+    VANILO_TRACE("%d tasks left", count);
+    VANILO_ASSERT(count >= 0);
+    VANILO_VERIFY(closeFile() == 0);
+
+    REQUIRE(closed == 1); // in release builds too
 }
