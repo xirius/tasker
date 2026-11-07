@@ -32,8 +32,8 @@ What it gives you:
   touching a dead executor.
 - Errors nobody handled go to a handler you can replace, rather than disappearing.
 
-The current release is `v1.0-rc2`, the release candidate of 1.0. The repository is called `tasker`; the library, its
-CMake package and its target are called Vanilo.
+The current release is `v1.0`. The repository is called `tasker`; the library, its CMake package and its target are
+called Vanilo.
 
 - [Getting it](#getting-it)
 - [Executors](#executors)
@@ -69,7 +69,7 @@ With `FetchContent`:
 include(FetchContent)
 FetchContent_Declare(tasker
     GIT_REPOSITORY https://github.com/xirius/tasker.git
-    GIT_TAG v1.0-rc2
+    GIT_TAG v1.0
     FIND_PACKAGE_ARGS NAMES Vanilo CONFIG)
 FetchContent_MakeAvailable(tasker)
 
